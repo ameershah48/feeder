@@ -556,7 +556,19 @@ async function getRates() {
 // ---------------------------------------------------------------------------
 // CSV export of identified cards
 
-const CSV_HEADER = ['TCGSDK ID', 'Name', 'Set', 'Price', 'Currency', 'Language'];
+// Each price is also given converted to these, rounded to the currency's usual decimals.
+const CSV_CURRENCIES = { USD: 2, MYR: 2, JPY: 0 };
+const CSV_HEADER = ['TCGSDK ID', 'Name', 'Set', 'Price', 'Currency', 'Language',
+  ...Object.keys(CSV_CURRENCIES).map((c) => `price_${c.toLowerCase()}`)];
+
+/** `price` in `to` with the rates from getRates(), or null when either currency has no rate. */
+function convertPrice(price, to, table) {
+  if (price?.amount == null) return null;
+  if (price.currency === to) return price.amount;
+  const from = table?.[price.currency];
+  const rate = table?.[to];
+  return from && rate ? (price.amount / from) * rate : null;
+}
 
 function csvCell(value) {
   let text = value == null ? '' : String(value);
@@ -566,11 +578,14 @@ function csvCell(value) {
 }
 
 /** One row per identified page, using its chosen match. Only the given pages when `wanted` isn't empty. */
-function exportCsv(wanted) {
+async function exportCsv(wanted) {
+  // Without exchange rates the converted columns stay empty rather than failing the export.
+  const table = (await getRates().catch(() => null))?.rates;
   const rows = pages
     .filter((p) => (!wanted.length || wanted.includes(p.id)) && p.match?.status === 'candidates')
     .map(({ match }) => chosenCandidate(match))
-    .map((top) => [top.id, top.name, top.set, top.price?.amount, top.price?.currency, top.language]);
+    .map((top) => [top.id, top.name, top.set, top.price?.amount, top.price?.currency, top.language,
+      ...Object.entries(CSV_CURRENCIES).map(([to, digits]) => convertPrice(top.price, to, table)?.toFixed(digits))]);
   return [CSV_HEADER, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }
 
@@ -697,7 +712,7 @@ async function handle(req, res) {
     case 'POST /api/identify': await startIdentify(await readJson(req)); return sendJson(res, 202, publicIdentify());
     case 'POST /api/identify/cancel': cancelIdentify(); return sendJson(res, 200, {});
     case 'GET /api/rates': return sendJson(res, 200, await getRates());
-    case 'POST /api/export': return sendCsv(res, exportCsv(ids(await readJson(req))));
+    case 'POST /api/export': return sendCsv(res, await exportCsv(ids(await readJson(req))));
   }
 
   if (req.method !== 'GET' && req.method !== 'HEAD') throw httpError(404, 'Not found');
