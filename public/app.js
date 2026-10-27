@@ -222,6 +222,7 @@ function renderJob() {
   button.classList.toggle('busy', Boolean(job));
   $('scanBtnText').textContent = !job ? 'Scan' : job.pages ? `Scanning · ${plural(job.pages, 'page')}` : 'Scanning…';
   $('settings').disabled = Boolean(job);
+  $('scanShortcut').hidden = Boolean(job);
 
   $('jobBox').hidden = !job;
   if (job) {
@@ -417,6 +418,12 @@ document.addEventListener('keydown', (e) => {
   } else if (e.key === 'Escape' && !viewer.open && state.selected.size) {
     state.selected.clear();
     renderPages();
+  } else if ((e.key === ' ' || e.key === 'Enter') && !e.repeat && !document.querySelector('dialog[open]')
+    && !e.target.closest('input, select, textarea, button, a[href], [contenteditable]')) {
+    // Space starts a scan and Enter opens the first page, unless the key is pressing a focused control.
+    e.preventDefault();
+    if (e.key === ' ') form.requestSubmit();
+    else if (state.pages.length) openViewer(state.pages[0].id);
   }
 });
 
@@ -516,6 +523,7 @@ function openViewer(id) {
   state.viewing = id;
   renderViewer();
   if (!viewer.open) viewer.showModal();
+  viewer.focus(); // not the first toolbar button, so Enter picks a match instead of rotating the page
 }
 
 function renderViewer() {
@@ -535,6 +543,7 @@ function renderViewer() {
   viewer.querySelector('.prev').disabled = index === 0;
   viewer.querySelector('.next').disabled = index === state.pages.length - 1;
   renderMatch(page);
+  renderCompare(page);
 }
 
 const MATCH_TITLES = {
@@ -553,17 +562,17 @@ function renderMatch(page) {
   // Rebuild only when the answer changes, so candidate images don't flicker on unrelated updates.
   const key = `${page.id}:${busy}:${match?.checkedAt}`;
   if (panel.hidden) return;
-  if (panel.dataset.key === key) {
-    markChosen(match);
-    return;
+  if (panel.dataset.key !== key) {
+    panel.dataset.key = key;
+    // A new page or a new answer: start by showing the card it counts as.
+    shown = comparable(page) ? page.match.candidates.indexOf(chosenCandidate(page.match)) : 0;
+    $('matchTitle').textContent = busy ? 'Identifying…' : MATCH_TITLES[match.status] ?? MATCH_TITLES.no_match;
+    $('matchReason').textContent = busy ? '' : match.reason
+      ?? (match.status === 'no_match' ? 'Try scanning it again, or choose the card game before identifying.' : '');
+    $('candidates').replaceChildren(...(busy ? [] : match.candidates.map(candidateItem)));
   }
-  panel.dataset.key = key;
-
-  $('matchTitle').textContent = busy ? 'Identifying…' : MATCH_TITLES[match.status] ?? MATCH_TITLES.no_match;
-  $('matchReason').textContent = busy ? '' : match.reason
-    ?? (match.status === 'no_match' ? 'Try scanning it again, or choose the card game before identifying.' : '');
-  $('candidates').replaceChildren(...(busy ? [] : match.candidates.map(candidateItem)));
-  if (!busy) markChosen(match);
+  $('matchHint').hidden = !comparable(page);
+  if (comparable(page)) markCandidates(page.match);
 }
 
 /** The candidate the user picked for a page, or the top match when they haven't picked one. */
@@ -571,14 +580,47 @@ function chosenCandidate(match) {
   return match.candidates[match.chosen] ?? match.candidates[0];
 }
 
-function markChosen(match) {
+// The match shown beside the scan. ↑ ↓ change it; Enter makes it the page's card.
+let shown = 0;
+
+const viewedPage = () => state.pages.find((p) => p.id === state.viewing);
+const comparable = (page) => page?.match?.status === 'candidates' && state.identify?.current !== page.id;
+
+function markCandidates(match) {
   const chosen = chosenCandidate(match);
   $('candidates').querySelectorAll('.candidate').forEach((li, i) => {
-    const on = match.candidates[i] === chosen;
-    li.classList.toggle('chosen', on);
-    li.setAttribute('aria-checked', String(on));
-    li.tabIndex = on ? 0 : -1;
+    li.classList.toggle('chosen', match.candidates[i] === chosen);
+    li.classList.toggle('shown', i === shown);
+    li.setAttribute('aria-selected', String(match.candidates[i] === chosen));
   });
+}
+
+function renderCompare(page) {
+  const on = comparable(page);
+  $('compareFigure').hidden = !on;
+  $('scanCaption').hidden = !on;
+  if (!on) return;
+  const { match } = page;
+  shown = Math.min(shown, match.candidates.length - 1);
+  const candidate = match.candidates[shown];
+  const img = $('compareImg');
+  img.hidden = !candidate.image;
+  if (candidate.image && img.getAttribute('src') !== candidate.image) img.src = candidate.image;
+  img.alt = candidate.name;
+  $('compareNoImage').hidden = Boolean(candidate.image);
+  $('compareCaption').textContent = [candidate.name, candidate.set, candidate.number].filter(Boolean).join(' · ');
+  const chosen = chosenCandidate(match) === candidate;
+  $('compareState').textContent = chosen ? 'In use' : `Match ${shown + 1} of ${match.candidates.length}`;
+  $('compareState').classList.toggle('chosen', chosen);
+}
+
+function showCandidate(index) {
+  const page = viewedPage();
+  if (!comparable(page)) return;
+  shown = Math.min(page.match.candidates.length - 1, Math.max(0, index));
+  markCandidates(page.match);
+  renderCompare(page);
+  $('candidates').children[shown]?.scrollIntoView({ block: 'nearest' });
 }
 
 /** Makes `index` the card a page counts as, for the grid, the value summary and the export. */
@@ -596,27 +638,14 @@ function chooseCandidate(index) {
 }
 
 $('candidates').addEventListener('click', (e) => {
-  if (e.target.closest('a[href], .candidate-zoom')) return; // these do their own thing
+  if (e.target.closest('a[href]')) return; // the name opens the card's page instead
   const li = e.target.closest('.candidate');
-  if (li) chooseCandidate([...li.parentNode.children].indexOf(li));
-});
-
-$('candidates').addEventListener('keydown', (e) => {
-  const li = e.target.closest('.candidate');
-  if (e.target !== li) return; // keys on the name link or zoom button act on those
-  const items = [...li.parentNode.children];
-  const index = items.indexOf(li);
-  const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
-  if (step) {
-    e.preventDefault();
-    e.stopPropagation(); // don't also flip the viewer to another page
-    const next = Math.min(items.length - 1, Math.max(0, index + step));
-    chooseCandidate(next);
-    items[next].focus();
-  } else if (e.key === ' ' || e.key === 'Enter') {
-    e.preventDefault();
-    chooseCandidate(index);
-  }
+  if (!li) return;
+  const index = [...li.parentNode.children].indexOf(li);
+  showCandidate(index);
+  // The magnifier only puts the match beside the scan; clicking the rest of it also uses it.
+  if (!e.target.closest('.candidate-zoom')) chooseCandidate(index);
+  viewer.focus(); // keep ↑ ↓ and Enter working after a click
 });
 
 /** Pages without a usable answer can be sent again, e.g. after rotating them or picking the card game. */
@@ -642,13 +671,12 @@ $('matchRetry').addEventListener('click', async () => {
 function candidateItem(candidate) {
   const li = document.createElement('li');
   li.className = 'candidate';
-  li.setAttribute('role', 'radio');
+  li.setAttribute('role', 'option');
   li.title = 'Use this card';
-  li.innerHTML = `<span class="candidate-thumb" hidden><img alt="" loading="lazy"><button type="button" class="candidate-zoom" title="Zoom in" aria-label="Zoom in">${icon('zoom', 14, 2.5)}</button></span><div><a class="candidate-name" target="_blank" rel="noopener noreferrer"></a><p class="candidate-meta"></p><p class="candidate-price"></p></div>`;
+  li.innerHTML = `<span class="candidate-thumb" hidden><img alt="" loading="lazy"><button type="button" class="candidate-zoom" tabindex="-1" title="Show beside the scan" aria-label="Show beside the scan">${icon('zoom', 14, 2.5)}</button></span><div><a class="candidate-name" target="_blank" rel="noopener noreferrer"></a><p class="candidate-meta"></p><p class="candidate-price"></p></div>`;
   if (candidate.image) {
     li.querySelector('img').src = candidate.image;
     li.querySelector('.candidate-thumb').hidden = false;
-    li.querySelector('.candidate-zoom').addEventListener('click', () => openZoom(candidate));
   }
   const name = li.querySelector('a');
   name.textContent = candidate.name;
@@ -659,18 +687,6 @@ function candidateItem(candidate) {
     : '';
   return li;
 }
-
-/** Shows a match's card image large, to compare it with the scan. */
-function openZoom(candidate) {
-  const img = $('zoomImg');
-  img.src = candidate.image;
-  img.alt = candidate.name;
-  $('zoomCaption').textContent = [candidate.name, candidate.set, candidate.number].filter(Boolean).join(' · ');
-  $('zoom').showModal();
-}
-
-$('zoom').addEventListener('click', () => $('zoom').close()); // anywhere, including the backdrop
-$('zoom').addEventListener('close', () => $('zoomImg').removeAttribute('src'));
 
 function formatPrice({ amount, currency }) {
   try {
@@ -849,6 +865,16 @@ viewer.addEventListener('click', async (e) => {
 viewer.addEventListener('keydown', (e) => {
   if (e.key === 'ArrowLeft') step(-1);
   if (e.key === 'ArrowRight') step(1);
+  if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    e.preventDefault(); // don't scroll the match list
+    showCandidate(shown + (e.key === 'ArrowUp' ? -1 : 1));
+  }
+  // Enter on a button or link the user tabbed to presses it; otherwise it uses the match shown.
+  if (e.key === 'Enter' && !e.repeat && !(e.target.closest('button, a[href]') && e.target.matches(':focus-visible'))) {
+    if (!comparable(viewedPage())) return;
+    e.preventDefault();
+    chooseCandidate(shown);
+  }
 });
 
 // ---------------------------------------------------------------------------

@@ -258,6 +258,20 @@ select:focus-visible, button:focus-visible, a:focus-visible, .segmented input:fo
 .scan-btn:disabled { cursor: default; opacity: 0.85; }
 .scan-btn.busy .scan-btn-icon svg { animation: spin 0.9s linear infinite; }
 
+.scan-shortcut { margin: 8px 0 0; text-align: center; font-size: 12.5px; color: var(--muted); }
+.scan-shortcut[hidden] { display: none; }
+.scan-shortcut kbd, .match-hint kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 11.5px;
+}
+@media (hover: none) { .scan-shortcut { display: none; } } /* touch screens have no Space key */
+
 @keyframes spin { to { transform: rotate(360deg); } }
 
 .job {
@@ -559,12 +573,32 @@ select:disabled { opacity: 0.5; cursor: default; }
   padding: 24px 64px;
   background: var(--bg);
 }
-.viewer-stage img {
-  max-width: 100%;
-  max-height: 100%;
-  background: var(--paper);
-  box-shadow: 0 0 0 1px var(--paper-edge), var(--shadow-lg);
+.viewer:focus { outline: none; }
+
+/* The scan, and beside it the match being compared when the page has any. */
+.viewer-images { flex: 1; align-self: stretch; min-width: 0; display: flex; gap: 24px; }
+.viewer-figure { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: 10px; margin: 0; }
+.viewer-figure[hidden] { display: none; }
+.viewer-frame { flex: 1; min-height: 0; display: flex; align-items: center; justify-content: center; }
+.viewer-frame img { max-width: 100%; max-height: 100%; }
+.viewer-frame img[hidden] { display: none; }
+#viewerImg { background: var(--paper); box-shadow: 0 0 0 1px var(--paper-edge), var(--shadow-lg); }
+#compareImg { border-radius: 4.5% / 3.2%; box-shadow: var(--shadow-lg); }
+.compare-empty { margin: 0; color: var(--muted); font-size: 13px; }
+.viewer-figure figcaption { text-align: center; font-size: 13px; font-weight: 600; overflow-wrap: anywhere; }
+.viewer-figure figcaption[hidden] { display: none; }
+.compare-state {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--surface-hover);
+  color: var(--muted);
+  font-size: 11.5px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
 }
+.compare-state.chosen { background: var(--accent-soft); color: var(--accent); }
 .nav {
   position: absolute;
   top: 50%;
@@ -611,6 +645,10 @@ select:disabled { opacity: 0.5; cursor: default; }
 .candidate:hover { border-color: var(--muted); }
 .candidate:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .candidate.chosen { border-color: var(--accent); background: var(--accent-soft); }
+.candidate.shown { outline: 2px solid var(--accent); outline-offset: 2px; }
+.match-hint { margin: 12px 0 0; color: var(--muted); font-size: 12px; }
+.match-hint[hidden] { display: none; }
+@media (hover: none) { .match-hint { display: none; } }
 .candidate-thumb { position: relative; flex: none; align-self: flex-start; }
 .candidate-thumb[hidden] { display: none; }
 .candidate-thumb img { display: block; width: 56px; border-radius: 3px; box-shadow: var(--shadow); }
@@ -632,18 +670,6 @@ select:disabled { opacity: 0.5; cursor: default; }
 .candidate-zoom:hover { background: rgba(10, 12, 16, 0.85); }
 .candidate-zoom:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
-.zoom {
-  max-width: none;
-  max-height: none;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  cursor: zoom-out;
-}
-.zoom[open] { display: flex; flex-direction: column; align-items: center; gap: 10px; }
-.zoom::backdrop { background: rgba(10, 12, 16, 0.8); }
-.zoom img { max-width: calc(100vw - 32px); max-height: calc(100dvh - 80px); border-radius: 12px; box-shadow: var(--shadow-lg); }
-.zoom p { margin: 0; color: #fff; font-size: 14px; text-align: center; }
 .candidate div { min-width: 0; }
 .candidate-name { display: block; font-weight: 600; color: var(--text); text-decoration: none; overflow-wrap: anywhere; }
 .candidate-name[href]:hover { color: var(--accent); text-decoration: underline; }
@@ -749,6 +775,7 @@ select.mini { width: auto; height: 26px; padding: 0 22px 0 8px; font-size: 12.5p
   .empty { position: static; padding: 48px 16px; }
   .viewer { width: 100vw; height: 100dvh; border-radius: 0; border: 0; }
   .viewer-stage { padding: 12px; }
+  .viewer-images { gap: 12px; }
   .nav { top: auto; bottom: 14px; margin: 0; }
   .viewer-body { flex-direction: column; }
   .viewer-match { width: auto; max-height: 45%; border-left: 0; border-top: 1px solid var(--border); padding: 14px 16px; }

@@ -75,10 +75,11 @@
         </fieldset>
 
         <div class="scan-actions">
-          <button type="submit" class="scan-btn" id="scanBtn">
+          <button type="submit" class="scan-btn" id="scanBtn" title="Scan (Space)">
             <span class="scan-btn-icon"></span>
             <span id="scanBtnText">Scan</span>
           </button>
+          <p class="scan-shortcut" id="scanShortcut">or press <kbd>Space</kbd> to scan</p>
           <div class="job" id="jobBox" hidden>
             <div class="job-line">
               <span id="jobStatus">Starting…</span>
@@ -170,7 +171,7 @@
     </aside>
   </div>
 
-  <dialog class="viewer" id="viewer" aria-label="Page viewer">
+  <dialog class="viewer" id="viewer" aria-label="Page viewer" tabindex="-1">
     <div class="viewer-bar">
       <span id="viewerTitle">Page 1 of 1</span>
       <div class="viewer-actions">
@@ -184,22 +185,33 @@
     <div class="viewer-body">
       <div class="viewer-stage">
         <button type="button" class="nav prev" data-viewer="prev" aria-label="Previous page"></button>
-        <img id="viewerImg" alt="">
+        <div class="viewer-images">
+          <figure class="viewer-figure">
+            <div class="viewer-frame"><img id="viewerImg" alt=""></div>
+            <figcaption id="scanCaption" hidden>Your scan</figcaption>
+          </figure>
+          <figure class="viewer-figure" id="compareFigure" hidden>
+            <div class="viewer-frame">
+              <img id="compareImg" alt="">
+              <p class="compare-empty" id="compareNoImage" hidden>No image for this match</p>
+            </div>
+            <figcaption>
+              <span id="compareCaption"></span>
+              <span class="compare-state" id="compareState"></span>
+            </figcaption>
+          </figure>
+        </div>
         <button type="button" class="nav next" data-viewer="next" aria-label="Next page"></button>
       </div>
       <aside class="viewer-match" id="viewerMatch" aria-label="Card match" hidden>
         <h3 id="matchTitle"></h3>
         <p class="match-reason" id="matchReason"></p>
         <button type="button" class="btn match-retry" id="matchRetry" hidden>Try again</button>
-        <ol class="candidates" id="candidates" role="radiogroup" aria-label="Choose the matching card"></ol>
-        <p class="match-note">Suggestions from the TCGSDK scanner beta. Click the right one if the top match is wrong.</p>
+        <ol class="candidates" id="candidates" role="listbox" aria-label="Possible matches"></ol>
+        <p class="match-hint" id="matchHint" hidden><kbd>↑</kbd> <kbd>↓</kbd> compare matches · <kbd>Enter</kbd> use the one shown</p>
+        <p class="match-note">Suggestions from the TCGSDK scanner beta. Check them before relying on them.</p>
       </aside>
     </div>
-  </dialog>
-
-  <dialog class="zoom" id="zoom" aria-label="Card image">
-    <img id="zoomImg" alt="">
-    <p id="zoomCaption"></p>
   </dialog>
 
   <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
