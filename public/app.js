@@ -360,6 +360,10 @@ function renderToolbar() {
   $('exportBtn').title = toExport
     ? `Download the top match of ${plural(toExport, 'card')} as a spreadsheet`
     : 'Identify cards to export them';
+  $('labelsBtn').disabled = !toExport;
+  $('labelsBtn').title = toExport
+    ? `Print a 50 × 30 mm label for ${plural(toExport, 'card')}`
+    : 'Identify cards to print their labels';
 }
 
 function toggleSelection(id, range) {
@@ -408,6 +412,7 @@ $('rotateRightBtn').addEventListener('click', () => rotate(selectedIds(), 90));
 $('deleteBtn').addEventListener('click', () => removePages(selectedIds()));
 $('identifyBtn').addEventListener('click', identify);
 $('exportBtn').addEventListener('click', exportCsv);
+$('labelsBtn').addEventListener('click', printLabels);
 $('identifyStopBtn').addEventListener('click', () => {
   api('POST', '/api/identify/cancel', {}).catch((err) => toast('error', err.message));
 });
@@ -466,6 +471,14 @@ async function exportCsv() {
   } catch (err) {
     toast('error', err.message);
   }
+}
+
+/** Opens the labels of the selection (or of every identified card) in a new tab, priced in the summary's currency. */
+function printLabels() {
+  const params = new URLSearchParams({ currency: $('summaryCurrency').value });
+  // Everything selected means the same as nothing selected, and keeps the URL short for big collections.
+  if (state.selected.size && state.selected.size < state.pages.length) params.set('ids', selectedIds().join(','));
+  window.open(`/print.html?${params}`, '_blank');
 }
 
 // Drag a page to reorder it.

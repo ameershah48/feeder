@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Card Labels</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/print.css">
+</head>
+<body>
+  <header class="bar">
+    <h1 id="info">Loading labels…</h1>
+    <button type="button" id="printBtn" disabled>Print</button>
+  </header>
+
+  <main class="sheet" id="sheet"></main>
+
+  <template id="labelTemplate">
+    <article class="label">
+      <header class="label-head">
+        <span class="logo"><b>TCG</b>Feedr</span>
+        <time class="label-date"></time>
+      </header>
+      <div class="label-info">
+        <p class="label-kicker"></p>
+        <div>
+          <p class="label-set"></p>
+          <p class="label-name"></p>
+        </div>
+        <p class="label-price"></p>
+      </div>
+      <div class="label-code">
+        <span class="label-bars"></span>
+        <span class="label-id"></span>
+      </div>
+    </article>
+  </template>
+
+  <script type="module" src="/print.js"></script>
+</body>
+</html>

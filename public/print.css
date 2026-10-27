@@ -1,0 +1,185 @@
+/* Card labels: 50 × 30 mm, black on white for thermal label printers. Shown at twice their size on screen. */
+
+:root {
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  color-scheme: light;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: #eef0f3;
+  color: #000;
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+p { margin: 0; }
+
+.bar {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 28px;
+  background: #141414;
+  color: #fff;
+}
+
+.bar h1 { margin: 0; font-size: 26px; font-weight: 500; }
+
+.bar button {
+  height: 38px;
+  padding: 0 22px;
+  border: 0;
+  border-radius: 8px;
+  background: #fff;
+  color: #000;
+  font: 600 15px var(--font);
+  cursor: pointer;
+}
+
+.bar button:disabled { opacity: 0.4; cursor: default; }
+
+.sheet {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 24px;
+  padding: 32px 24px 48px;
+}
+
+/* ---------- Label ---------- */
+
+.label {
+  zoom: 2;
+  display: grid;
+  grid-template-rows: 7mm minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 21mm;
+  width: 50mm;
+  height: 30mm;
+  overflow: hidden;
+  background: #fff;
+  border-radius: 1mm;
+  box-shadow: 0 0.2mm 1.2mm rgba(15, 23, 42, 0.12);
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+.label-head {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 2mm;
+  padding: 0 2.4mm;
+  border-bottom: 0.3mm solid #000;
+}
+
+.logo {
+  font-size: 3.4mm;
+  font-style: italic;
+  font-weight: 900;
+  line-height: 1;
+  letter-spacing: -0.03em;
+  white-space: nowrap;
+}
+
+.logo b {
+  display: inline-block;
+  margin-right: 0.4mm;
+  padding: 0.35mm 0.7mm 0.25mm 0.5mm;
+  border-radius: 0.5mm;
+  background: #000;
+  color: #fff;
+  font-weight: inherit;
+  transform: skewX(-8deg);
+}
+
+.label-date, .label-kicker, .label-price, .label-id {
+  font-weight: 700;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.label-date { font-size: 1.7mm; letter-spacing: 0.1em; }
+
+.label-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-width: 0;
+  padding: 1.6mm 1.6mm 1.5mm 2.4mm;
+}
+
+.label-kicker, .label-set {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.label-kicker { font-size: 1.75mm; letter-spacing: 0.16em; }
+
+.label-set {
+  margin-bottom: 0.4mm;
+  padding-left: 1.5mm;
+  color: #555;
+  font-size: 1.35mm;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.label-name {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  padding-left: 1.1mm;
+  border-left: 0.45mm solid #000;
+  font-size: 2.6mm;
+  font-weight: 800;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.label-price { font-size: 1.75mm; letter-spacing: 0.12em; }
+
+.label-code {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  padding: 2.2mm 1.6mm 1.5mm;
+  border-left: 0.3mm solid #000;
+}
+
+.label-bars { width: 100%; }
+.label-bars svg { width: 100%; height: 9.5mm; }
+
+.label-id { font-size: 2mm; letter-spacing: 0.12em; }
+
+.label-none {
+  display: grid;
+  place-items: center;
+  height: 9.5mm;
+  color: #666;
+  font-size: 1.4mm;
+  text-align: center;
+}
+
+/* ---------- Printing: one label per 50 × 30 mm page ---------- */
+
+@page { size: 50mm 30mm; margin: 0; }
+
+@media print {
+  body { background: none; }
+  .bar { display: none; }
+  .sheet { display: block; padding: 0; }
+  .label { zoom: 1; border-radius: 0; box-shadow: none; break-after: page; }
+  .label:last-child { break-after: auto; }
+}

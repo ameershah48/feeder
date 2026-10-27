@@ -577,12 +577,15 @@ function csvCell(value) {
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
-/** One row per identified page, using its chosen match. Only the given pages when `wanted` isn't empty. */
+/** Identified pages, in page order. Only the given pages when `wanted` isn't empty. */
+const identified = (wanted) => pages
+  .filter((p) => (!wanted.length || wanted.includes(p.id)) && p.match?.status === 'candidates');
+
+/** One row per identified page, using its chosen match. */
 async function exportCsv(wanted) {
   // Without exchange rates the converted columns stay empty rather than failing the export.
   const table = (await getRates().catch(() => null))?.rates;
-  const rows = pages
-    .filter((p) => (!wanted.length || wanted.includes(p.id)) && p.match?.status === 'candidates')
+  const rows = identified(wanted)
     .map(({ match }) => chosenCandidate(match))
     .map((top) => [top.id, top.name, top.set, top.price?.amount, top.price?.currency, top.language,
       ...Object.entries(CSV_CURRENCIES).map(([to, digits]) => convertPrice(top.price, to, table)?.toFixed(digits))]);
@@ -592,6 +595,28 @@ async function exportCsv(wanted) {
 function sendCsv(res, csv) {
   res.writeHead(200, { 'Content-Type': 'text/csv; charset=utf-8', 'Cache-Control': 'no-store' });
   res.end(`\uFEFF${csv}`); // the BOM makes Excel read Japanese names as UTF-8
+}
+
+// ---------------------------------------------------------------------------
+// Labels of identified cards, for public/print.html
+
+/** One label per identified page, priced in `currency` when there's a rate for it and in TCGSDK's currency otherwise. */
+async function cardLabels(wanted, currency) {
+  const table = (await getRates().catch(() => null))?.rates;
+  return identified(wanted).map(({ match }) => {
+    const top = chosenCandidate(match);
+    const amount = convertPrice(top.price, currency, table);
+    return {
+      code: top.id == null ? null : String(top.id), // the TCGSDK ID, printed as the barcode
+      name: top.name,
+      set: top.set,
+      number: top.number,
+      rarity: top.rarity,
+      language: top.language,
+      price: amount == null ? top.price && { amount: top.price.amount, currency: top.price.currency } : { amount, currency },
+      checkedAt: match.checkedAt,
+    };
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -688,7 +713,7 @@ async function handle(req, res) {
   const hostname = (req.headers.host ?? '').replace(/:\d+$/, '');
   if (loopbackOnly && !LOOPBACK_NAMES.has(hostname)) throw httpError(403, 'Forbidden host.');
 
-  const { pathname } = new URL(req.url, 'http://localhost');
+  const { pathname, searchParams } = new URL(req.url, 'http://localhost');
   const route = `${req.method} ${pathname}`;
 
   switch (route) {
@@ -713,6 +738,11 @@ async function handle(req, res) {
     case 'POST /api/identify/cancel': cancelIdentify(); return sendJson(res, 200, {});
     case 'GET /api/rates': return sendJson(res, 200, await getRates());
     case 'POST /api/export': return sendCsv(res, await exportCsv(ids(await readJson(req))));
+    case 'GET /api/labels': {
+      const wanted = searchParams.get('ids')?.split(',').filter(Boolean) ?? [];
+      const currency = searchParams.get('currency');
+      return sendJson(res, 200, await cardLabels(wanted, /^[A-Z]{3}$/.test(currency) ? currency : null));
+    }
   }
 
   if (req.method !== 'GET' && req.method !== 'HEAD') throw httpError(404, 'Not found');
