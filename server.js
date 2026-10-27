@@ -1,6 +1,6 @@
 // Feeder — a local web UI for a USB document scanner (built for the HP ScanJet Pro 2000).
-// Serves the UI, drives the native ImageCaptureCore helper, and pushes scanned pages to
-// the browser over Server-Sent Events as they come off the feeder.
+// Serves the UI, drives the native scanner helper (ImageCaptureCore on macOS, WIA on Windows),
+// and pushes scanned pages to the browser over Server-Sent Events as they come off the feeder.
 
 import http from 'node:http';
 import { spawn, execFile } from 'node:child_process';
@@ -19,7 +19,11 @@ try { process.loadEnvFile(path.join(ROOT, '.env')); } catch {} // optional; hold
 
 const PORT = Number(process.env.PORT) || 3000;
 const HOST = process.env.HOST || '127.0.0.1';
-const HELPER = process.env.SCAN_HELPER || path.join(ROOT, 'bin', 'scanhelper');
+const WINDOWS = process.platform === 'win32';
+const HELPER = process.env.SCAN_HELPER || (WINDOWS
+  ? path.join(ROOT, 'native', 'scanhelper.ps1')
+  : path.join(ROOT, 'bin', 'scanhelper'));
+const IMAGE_TOOL = path.join(ROOT, 'native', 'imagetool.ps1'); // Windows stand-in for sips
 const DATA_DIR = path.resolve(process.env.SCANS_DIR || path.join(ROOT, 'scans'));
 const PAGES_DIR = path.join(DATA_DIR, 'pages');
 const THUMBS_DIR = path.join(DATA_DIR, 'thumbs');
@@ -29,8 +33,25 @@ const INDEX_FILE = path.join(DATA_DIR, 'pages.json');
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const TCGSDK_API = (process.env.TCGSDK_API_URL || 'https://tcgsdk.com/api').replace(/\/+$/, '');
 const TCGSDK_KEY = process.env.TCGSDK_API_KEY?.trim() || '';
+const RATES_API = (process.env.RATES_API_URL || 'https://api.frankfurter.dev/v1').replace(/\/+$/, '');
 
 const exec = promisify(execFile);
+
+/** The [command, args] that run `file`; PowerShell scripts need powershell.exe in front. */
+function commandLine(file, args) {
+  if (!file.endsWith('.ps1')) return [file, args];
+  return ['powershell.exe', ['-NoProfile', '-NonInteractive', '-STA', '-File', file, ...args]];
+}
+
+const run = (file, args, options = {}) => exec(...commandLine(file, args), { windowsHide: true, ...options });
+
+/** Turns PowerShell's execution policy error into something the user can act on. */
+function helperFailure(stderr) {
+  if (/running scripts is disabled/i.test(stderr ?? '')) {
+    return 'Windows is blocking Feeder\'s PowerShell scripts. Run "Set-ExecutionPolicy -Scope CurrentUser RemoteSigned" in PowerShell, then try again.';
+  }
+  return stderr?.trim() || null;
+}
 
 let pages = []; // in display order
 let job = null; // the scan in progress, if any
@@ -75,12 +96,22 @@ async function saveIndex() {
 const thumbPath = (page) => path.join(THUMBS_DIR, `${page.id}.jpg`);
 const matchPath = (page) => path.join(MATCHES_DIR, `${page.id}.json`);
 
+/** Shrinks `src` to fit `max` × `max` and saves it as a JPEG at `out`. */
+async function resizeImage(src, out, max, quality) {
+  if (WINDOWS) return run(IMAGE_TOOL, ['resize', src, out, String(max), String(quality)]);
+  await exec('sips', ['-Z', String(max), '-s', 'format', 'jpeg', '-s', 'formatOptions', String(quality), src, '--out', out]);
+}
+
 async function makeThumb(page) {
-  await exec('sips', ['-Z', '480', '-s', 'format', 'jpeg', '-s', 'formatOptions', '75',
-    path.join(PAGES_DIR, page.file), '--out', thumbPath(page)]);
+  await resizeImage(path.join(PAGES_DIR, page.file), thumbPath(page), 480, 75);
 }
 
 async function imageSize(file) {
+  if (WINDOWS) {
+    const { stdout } = await run(IMAGE_TOOL, ['size', file]);
+    const { width, height } = JSON.parse(stdout);
+    return { width: width || null, height: height || null };
+  }
   const { stdout } = await exec('sips', ['-g', 'pixelWidth', '-g', 'pixelHeight', file]);
   return {
     width: Number(stdout.match(/pixelWidth: (\d+)/)?.[1]) || null,
@@ -99,13 +130,18 @@ async function ingest(src, meta) {
   pages.push(page);
   await saveIndex();
   broadcast('pages', pages);
+  return page;
 }
 
 async function rotatePages(ids, degrees) {
   for (const page of pages.filter((p) => ids.includes(p.id))) {
-    const quality = page.file.endsWith('.jpg') ? ['-s', 'formatOptions', '92'] : [];
-    await exec('sips', ['-r', String(degrees), ...quality, path.join(PAGES_DIR, page.file)]);
-    await exec('sips', ['-r', String(degrees), thumbPath(page)]);
+    if (WINDOWS) {
+      await run(IMAGE_TOOL, ['rotate', String(degrees), path.join(PAGES_DIR, page.file), thumbPath(page)]);
+    } else {
+      const quality = page.file.endsWith('.jpg') ? ['-s', 'formatOptions', '92'] : [];
+      await exec('sips', ['-r', String(degrees), ...quality, path.join(PAGES_DIR, page.file)]);
+      await exec('sips', ['-r', String(degrees), thumbPath(page)]);
+    }
     if (Math.abs(degrees) % 180 === 90) [page.width, page.height] = [page.height, page.width];
     page.rev += 1;
   }
@@ -141,8 +177,9 @@ let listing = null;
 function listScanners() {
   if (!existsSync(HELPER)) throw httpError(500, 'The scanner helper is not built yet. Run "npm run build" and restart.');
   // Share one helper run between concurrent requests.
-  listing ??= exec(HELPER, ['list'], { timeout: 15000 })
+  listing ??= run(HELPER, ['list'], { timeout: 15000 })
     .then(({ stdout }) => JSON.parse(stdout.trim().split('\n').pop()).devices ?? [])
+    .catch((err) => { throw httpError(500, helperFailure(err.stderr) ?? err.message); })
     .finally(() => { listing = null; });
   return listing;
 }
@@ -159,6 +196,8 @@ function startScan(body) {
     mode: oneOf(body.mode, ['color', 'gray', 'bw'], 'color'),
     paper: oneOf(body.paper, ['a4', 'letter', 'legal', 'tcg'], 'a4'),
     duplex: body.duplex === true,
+    identify: body.identify === true, // identify each card as soon as it is scanned
+    game: oneOf(body.game, GAMES, ''),
   };
   const id = newId();
   const outDir = path.join(INCOMING_DIR, id);
@@ -167,7 +206,7 @@ function startScan(body) {
   if (settings.device) args.push('--device', settings.device);
   if (settings.duplex) args.push('--duplex');
 
-  const proc = spawn(HELPER, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+  const proc = spawn(...commandLine(HELPER, args), { stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true });
   job = { id, proc, settings, status: 'Starting…', count: 0, percent: null, cancelled: false };
   broadcastJob();
 
@@ -190,6 +229,7 @@ function startScan(body) {
         job.percent = null;
         ingesting = ingesting
           .then(() => ingest(event.path, { scan: id, resolution: event.resolution, mode: settings.mode }))
+          .then((page) => { if (settings.identify) queueIdentify(page, settings.game); })
           .catch((err) => notify('error', `Could not save page ${event.index}: ${err.message}`));
         break;
       case 'warning':
@@ -210,7 +250,7 @@ function startScan(body) {
     job = null;
     broadcastJob();
     if (failure) notify('error', failure);
-    else if (code !== 0 && !cancelled) notify('error', stderr.trim() || `The scanner helper stopped unexpectedly (code ${code}).`);
+    else if (code !== 0 && !cancelled) notify('error', helperFailure(stderr) || `The scanner helper stopped unexpectedly (code ${code}).`);
     broadcast('done', { pages: count, cancelled });
   });
 }
@@ -242,10 +282,9 @@ async function startIdentify(body) {
   const queue = wanted.length ? pages.filter((p) => wanted.includes(p.id)) : unidentified();
   if (!queue.length) throw httpError(400, 'Every card has been identified. Select cards to check them again.');
   const game = oneOf(body.game, GAMES, '');
-  await checkScannerReady(game);
-  if (identifying) throw httpError(409, 'Cards are already being identified.'); // started during the check
 
-  identifying = {
+  // Claim the run before the check, so cards scanned meanwhile join it instead of starting another.
+  const run = identifying = {
     ids: queue.map((p) => p.id),
     done: 0,
     current: null,
@@ -254,7 +293,28 @@ async function startIdentify(body) {
     abort: new AbortController(),
   };
   broadcastIdentify();
-  runIdentify(identifying);
+  try {
+    await checkScannerReady(game);
+  } catch (err) {
+    identifying = null;
+    broadcastIdentify();
+    throw err;
+  }
+  runIdentify(run);
+}
+
+/** Identifies a freshly scanned card, adding it to the run in progress when there is one. */
+function queueIdentify(page, game) {
+  if (identifying) {
+    if (identifying.abort.signal.aborted) return; // stopped by hand; leave the rest of this scan alone
+    identifying.ids.push(page.id); // runIdentify's loop picks it up
+    broadcastIdentify();
+    return;
+  }
+  startIdentify({ ids: [page.id], game }).catch((err) => {
+    if (job) job.settings.identify = false; // one notice is enough, not one per card
+    notify('error', err.message);
+  });
 }
 
 /** Fails fast when TCGSDK can't recognise cards yet. The capabilities call is free; a scan is not. */
@@ -315,6 +375,7 @@ async function runIdentify(run) {
     }
   } catch (err) {
     if (err.name !== 'AbortError') failure = err.message;
+    if (job) job.settings.identify = false; // stopped or failed: don't restart for the next card scanned
   } finally {
     identifying = null;
     broadcastIdentify();
@@ -402,7 +463,7 @@ async function uploadImage(page) {
   }
   const out = path.join(os.tmpdir(), `feeder-${newId()}.jpg`);
   try {
-    await exec('sips', ['-Z', '3000', '-s', 'format', 'jpeg', '-s', 'formatOptions', '85', file, '--out', out]);
+    await resizeImage(file, out, 3000, 85);
     return new Blob([await fs.readFile(out)], { type: 'image/jpeg' });
   } finally {
     await fs.rm(out, { force: true });
@@ -456,6 +517,28 @@ function tcgsdkUrl(value) {
   } catch {
     return null;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Exchange rates, so the summary can total cards priced in different currencies.
+// Frankfurter publishes the European Central Bank's daily reference rates. https://frankfurter.dev
+
+const RATES_TTL = 6 * 3600e3;
+let rates = null; // { base, date, rates, fetchedAt }
+
+async function getRates() {
+  if (rates && Date.now() - rates.fetchedAt < RATES_TTL) return rates;
+  try {
+    const res = await fetch(`${RATES_API}/latest?base=USD`, { signal: AbortSignal.timeout(10_000) });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (typeof data?.rates !== 'object') throw new Error('unexpected answer');
+    rates = { base: 'USD', date: data.date ?? null, rates: { ...data.rates, USD: 1 }, fetchedAt: Date.now() };
+  } catch (err) {
+    if (!rates) throw httpError(502, `Could not get exchange rates: ${err.cause?.message ?? err.message}`);
+    // Keep using the last rates we had; they are at most a few days old.
+  }
+  return rates;
 }
 
 // ---------------------------------------------------------------------------
@@ -596,6 +679,7 @@ async function handle(req, res) {
     }
     case 'POST /api/identify': await startIdentify(await readJson(req)); return sendJson(res, 202, publicIdentify());
     case 'POST /api/identify/cancel': cancelIdentify(); return sendJson(res, 200, {});
+    case 'GET /api/rates': return sendJson(res, 200, await getRates());
     case 'POST /api/export': return sendCsv(res, exportCsv(ids(await readJson(req))));
   }
 

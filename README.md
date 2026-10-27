@@ -7,10 +7,16 @@ reorder, rotate and delete pages, then press **Identify cards** to look each tra
 
 ## Requirements
 
-- macOS, with the scanner connected by USB
+- macOS or Windows 10/11, with the scanner connected by USB
 - Node.js 20 or newer
-- Xcode Command Line Tools, used to compile the small native helper (`xcode-select --install`)
-- HP's scanner driver. It's already installed if **Image Capture** or **HP Easy Scan** can see the scanner.
+- **macOS:** Xcode Command Line Tools, used to compile the small native helper (`xcode-select --install`),
+  and HP's scanner driver. It's already installed if **Image Capture** or **HP Easy Scan** can see the scanner.
+- **Windows:** HP's scanner driver (it's installed if **Windows Fax and Scan** or **HP Scan** can see the scanner),
+  and PowerShell allowed to run local scripts. Windows blocks them by default; allow them once with:
+
+  ```powershell
+  Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
+  ```
 
 ## Run it
 
@@ -20,8 +26,8 @@ npm start
 
 Then open <http://localhost:3000>.
 
-The first `npm start` compiles `bin/scanhelper` from `native/scanhelper.swift`, which takes a few seconds.
-No `npm install` is needed because the app has no dependencies.
+On macOS the first `npm start` compiles `bin/scanhelper` from `native/scanhelper.swift`, which takes a few seconds.
+Windows needs no build step. No `npm install` is needed because the app has no dependencies.
 
 ## Identifying cards
 
@@ -29,6 +35,7 @@ No `npm install` is needed because the app has no dependencies.
 2. Copy `.env.example` to `.env`, set `TCGSDK_API_KEY=<your token>` and restart Feeder.
 3. Set **Page size** to **Trading card** and scan your cards one-sided.
 4. Optionally pick the card game next to the button, then press **Identify cards**.
+   Or tick **Auto-identify** before scanning, and each card is identified as soon as it comes off the feeder.
 
 Feeder sends the pages one at a time. Each result appears under its thumbnail, and the viewer lists up to five
 possible matches with set, number, rarity and price. The scanner API is in beta, so treat its answers as suggestions.
@@ -51,7 +58,10 @@ Browser (public/)  ⇄  Node server (server.js)  ⇄  bin/scanhelper (Swift + Im
 
 - **`native/scanhelper.swift`** uses Apple's ImageCaptureCore framework, the same one Image Capture uses.
   It finds the scanner, opens a session, sets up the document feeder, scans, and reports each page as a JSON line.
-- **`server.js`** runs the helper, moves each finished page into `scans/`, creates a thumbnail with `sips`,
+- **`native/scanhelper.ps1`** does the same on Windows through WIA (Windows Image Acquisition), with the same
+  commands and JSON lines. **`native/imagetool.ps1`** makes thumbnails and rotates pages there instead of `sips`.
+- **`server.js`** runs the helper, moves each finished page into `scans/`, creates a thumbnail with `sips`
+  (or `imagetool.ps1` on Windows),
   sends pages to TCGSDK when you identify cards, and pushes updates to the browser with Server-Sent Events.
 - **`public/`** is the UI.
 
@@ -66,12 +76,16 @@ Scans are kept in `scans/` (`pages.json` stores the page order), so they're stil
 | `SCANS_DIR` | `./scans`   | Where pages are stored |
 | `TCGSDK_API_KEY` | (none) | TCGSDK API token, needed for **Identify cards**. Put it in `.env`. |
 | `TCGSDK_API_URL` | `https://tcgsdk.com/api` | TCGSDK API base URL |
+| `RATES_API_URL` | `https://api.frankfurter.dev/v1` | Exchange rates for the summary's total value (Frankfurter API) |
 
 ## Troubleshooting
 
 - **"No scanner found"**: check the USB cable and power, then open **Image Capture**. If the scanner
   doesn't show up there either, install HP Easy Scan from hp.com.
-- **"In use by another app"**: quit HP Easy Scan or Image Capture. Only one app can use the scanner at a time.
+- **"In use by another app"**: quit HP Easy Scan or Image Capture (HP Scan or Windows Scan on Windows).
+  Only one app can use the scanner at a time.
+- **"Windows is blocking Feeder's PowerShell scripts"**: run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned`
+  in PowerShell, then try again.
 - **"TCGSDK did not accept the API token"**: check `TCGSDK_API_KEY` in `.env`, then restart Feeder.
 - **Inspect what the driver supports** (resolutions, duplex, paper sizes, whether paper is loaded):
 
@@ -84,4 +98,11 @@ Scans are kept in `scans/` (`pages.json` stores the page order), so they're stil
   ```sh
   ./bin/scanhelper list
   ./bin/scanhelper scan --out /tmp/test --resolution 300 --mode color --duplex
+  ```
+
+  On Windows:
+
+  ```powershell
+  powershell -STA -File native\scanhelper.ps1 list
+  powershell -STA -File native\scanhelper.ps1 scan --out $env:TEMP\test --resolution 300 --mode color --duplex
   ```

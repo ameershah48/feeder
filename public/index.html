@@ -13,9 +13,12 @@
       <img src="/icon.svg" alt="" width="28" height="28">
       <span>Feeder</span>
     </div>
-    <div class="device-pill" id="devicePill" data-state="searching">
-      <span class="dot"></span>
-      <span id="devicePillText">Looking for scanners…</span>
+    <div class="topbar-end">
+      <div class="device-pill" id="devicePill" data-state="searching">
+        <span class="dot"></span>
+        <span id="devicePillText">Looking for scanners…</span>
+      </div>
+      <button type="button" class="icon-btn" id="summaryToggle" aria-controls="summary" aria-expanded="false" title="Show collection summary" aria-label="Collection summary"></button>
     </div>
   </header>
 
@@ -113,6 +116,9 @@
             <option value="riftbound">Riftbound</option>
             <option value="ultraman">Ultraman</option>
           </select>
+          <label class="auto-toggle" title="Identify each card as soon as it is scanned">
+            <input type="checkbox" id="autoIdentify"><span>Auto-identify</span>
+          </label>
           <span class="identify-status" id="identifyStatus" hidden></span>
           <button type="button" class="btn" id="identifyStopBtn" hidden>Stop</button>
           <button type="button" class="btn primary" id="identifyBtn" disabled>Identify cards</button>
@@ -132,6 +138,36 @@
         <p>Put your pages face down in the feeder, choose your settings and press <b>Scan</b>. Each page shows up here as it comes through.</p>
       </div>
     </main>
+
+    <div class="summary-scrim" id="summaryScrim" hidden></div>
+    <aside class="summary" id="summary" aria-label="Collection summary" hidden>
+      <div class="summary-head">
+        <h2>Collection</h2>
+        <button type="button" class="icon-btn" id="summaryClose" title="Hide summary" aria-label="Hide summary"></button>
+      </div>
+      <div class="summary-value">
+        <div class="summary-value-head">
+          <span class="summary-label">Total value</span>
+          <select id="summaryCurrency" class="mini" aria-label="Show total in">
+            <option value="MYR">MYR</option>
+            <option value="USD">USD</option>
+          </select>
+        </div>
+        <strong id="summaryValue">—</strong>
+        <span class="summary-sub" id="summaryValueNote"></span>
+      </div>
+      <dl class="summary-stats">
+        <div><dt>Cards</dt><dd id="statCards">0</dd></div>
+        <div><dt>Identified</dt><dd id="statFound">0</dd></div>
+        <div><dt>No match</dt><dd id="statMissing">0</dd></div>
+        <div><dt>Not checked</dt><dd id="statPending">0</dd></div>
+      </dl>
+      <p class="summary-selection" id="summarySelection" hidden></p>
+      <h3>Most valuable</h3>
+      <ol class="top-cards" id="topCards"></ol>
+      <p class="summary-empty" id="topCardsEmpty">Identified cards with a price show up here.</p>
+      <p class="match-note">Uses each card’s top match and its market price from TCGSDK.</p>
+    </aside>
   </div>
 
   <dialog class="viewer" id="viewer" aria-label="Page viewer">
@@ -154,6 +190,7 @@
       <aside class="viewer-match" id="viewerMatch" aria-label="Card match" hidden>
         <h3 id="matchTitle"></h3>
         <p class="match-reason" id="matchReason"></p>
+        <button type="button" class="btn match-retry" id="matchRetry" hidden>Try again</button>
         <ol class="candidates" id="candidates"></ol>
         <p class="match-note">Suggestions from the TCGSDK scanner beta. Check them before relying on them.</p>
       </aside>

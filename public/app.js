@@ -15,6 +15,7 @@ const PATHS = {
   check: '<path d="M20 6 9 17l-5-5"/>',
   scan: '<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M3 12h18"/>',
   spinner: '<path d="M21 12a9 9 0 1 1-6.22-8.56"/>',
+  panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',
 };
 
 const icon = (name, size = 16, stroke = 2) =>
@@ -92,7 +93,7 @@ function readSettings() {
   const f = form.elements;
   return {
     device: f.device.value, sides: f.sides.value, mode: f.mode.value, resolution: f.resolution.value,
-    paper: f.paper.value, game: $('game').value,
+    paper: f.paper.value, game: $('game').value, autoIdentify: $('autoIdentify').checked,
   };
 }
 
@@ -102,6 +103,7 @@ function loadSettings() {
   const usesLetter = /-(US|CA|MX|PH|CO|CL|VE)$/i.test(navigator.language);
   const values = { sides: 'single', mode: 'color', resolution: '300', paper: usesLetter ? 'letter' : 'a4', ...saved };
   if ([...$('game').options].some((o) => o.value === values.game)) $('game').value = values.game;
+  $('autoIdentify').checked = values.autoIdentify === true;
   for (const name of ['sides', 'mode', 'resolution', 'paper']) {
     const field = form.elements[name];
     if (field instanceof HTMLSelectElement && ![...field.options].some((o) => o.value === values[name])) continue;
@@ -176,6 +178,7 @@ form.addEventListener('change', () => {
   renderPaperHint();
 });
 $('game').addEventListener('change', saveSettings);
+$('autoIdentify').addEventListener('change', saveSettings);
 
 function renderPaperHint() {
   $('paperHint').textContent = form.elements.paper.value === 'tcg'
@@ -194,6 +197,8 @@ form.addEventListener('submit', async (e) => {
       mode: s.mode,
       resolution: Number(s.resolution),
       paper: s.paper,
+      identify: s.autoIdentify,
+      game: s.game,
     });
   } catch (err) {
     toast('error', err.message);
@@ -245,6 +250,7 @@ function renderPages() {
 
   $('empty').hidden = state.pages.length > 0 || Boolean(state.job);
   renderToolbar();
+  renderSummary();
   if (state.viewing) renderViewer();
 }
 
@@ -405,7 +411,9 @@ $('identifyStopBtn').addEventListener('click', () => {
 });
 
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && !viewer.open && state.selected.size) {
+  if (e.key === 'Escape' && !viewer.open && narrow.matches && !$('summary').hidden) {
+    setSummaryOpen(false);
+  } else if (e.key === 'Escape' && !viewer.open && state.selected.size) {
     state.selected.clear();
     renderPages();
   }
@@ -540,6 +548,7 @@ function renderMatch(page) {
   const busy = state.identify?.current === page.id;
   const { match } = page;
   panel.hidden = !match && !busy;
+  renderRetry(page, busy);
   // Rebuild only when the answer changes, so candidate images don't flicker on unrelated updates.
   const key = `${page.id}:${busy}:${match?.checkedAt}`;
   if (panel.hidden || panel.dataset.key === key) return;
@@ -550,6 +559,26 @@ function renderMatch(page) {
     ?? (match.status === 'no_match' ? 'Try scanning it again, or choose the card game before identifying.' : '');
   $('candidates').replaceChildren(...(busy ? [] : match.candidates.map(candidateItem)));
 }
+
+/** Pages without a usable answer can be sent again, e.g. after rotating them or picking the card game. */
+function renderRetry(page, busy) {
+  const button = $('matchRetry');
+  button.hidden = busy || !['retake', 'no_match', 'error'].includes(page.match?.status);
+  button.disabled = Boolean(state.identify);
+  button.title = state.identify ? 'Wait for the cards being identified to finish' : '';
+}
+
+$('matchRetry').addEventListener('click', async () => {
+  const id = state.viewing;
+  if (!id) return;
+  $('matchRetry').disabled = true;
+  try {
+    await api('POST', '/api/identify', { ids: [id], game: $('game').value });
+  } catch (err) {
+    toast('error', err.message);
+    renderViewer();
+  }
+});
 
 function candidateItem(candidate) {
   const li = document.createElement('li');
@@ -576,6 +605,143 @@ function formatPrice({ amount, currency }) {
   } catch {
     return `${amount} ${currency}`;
   }
+}
+
+// ---------------------------------------------------------------------------
+// Collection summary
+
+const SUMMARY_KEY = 'feeder.summaryOpen';
+const CURRENCY_KEY = 'feeder.currency';
+const narrow = matchMedia('(max-width: 820px)');
+let exchange = null; // { base, date, rates } once loaded
+let exchangeError = '';
+
+async function loadRates() {
+  try {
+    exchange = await api('GET', '/api/rates');
+    exchangeError = '';
+  } catch (err) {
+    exchangeError = err.message;
+  }
+  renderSummary();
+}
+
+/** `price` in `currency`, or null when there's no rate for one side. */
+function convert({ amount, currency: from }, to) {
+  if (from === to) return amount;
+  const r = exchange?.rates;
+  return r?.[from] && r?.[to] ? (amount / r[from]) * r[to] : null;
+}
+
+/** The top match of an identified page, when it has a price. */
+const pricedTop = (page) => (page.match?.status === 'candidates' && page.match.candidates[0]?.price ? page.match.candidates[0] : null);
+
+/**
+ * Totals prices in the chosen currency. TCGSDK quotes cards in different currencies, so prices are
+ * converted; any that can't be (rates not loaded yet) are added per currency after it.
+ */
+function totalValue(list) {
+  const to = $('summaryCurrency').value;
+  let total = 0;
+  let converted = 0;
+  const rest = new Map();
+  for (const page of list) {
+    const top = pricedTop(page);
+    if (!top) continue;
+    const value = convert(top.price, to);
+    if (value == null) rest.set(top.price.currency, (rest.get(top.price.currency) ?? 0) + top.price.amount);
+    else { total += value; converted += 1; }
+  }
+  const parts = [...rest].map(([currency, amount]) => formatPrice({ amount, currency }));
+  if (converted) parts.unshift(formatPrice({ amount: total, currency: to }));
+  return parts.join(' + ');
+}
+
+/** A price in USD for sorting, falling back to the raw amount without rates. */
+const sortValue = (page) => convert(pricedTop(page).price, 'USD') ?? pricedTop(page).price.amount;
+
+function renderSummary() {
+  const { pages } = state;
+  const found = pages.filter((p) => p.match?.status === 'candidates');
+  const priced = found.filter(pricedTop);
+  $('statCards').textContent = pages.length;
+  $('statFound').textContent = found.length;
+  $('statMissing').textContent = pages.filter((p) => ['no_match', 'retake'].includes(p.match?.status)).length;
+  $('statPending').textContent = pages.filter((p) => !p.match || p.match.status === 'error').length;
+
+  $('summaryValue').textContent = totalValue(pages) || '—';
+  const unpriced = found.length - priced.length;
+  const to = $('summaryCurrency').value;
+  const mixed = priced.some((p) => pricedTop(p).price.currency !== to);
+  const rateNote = !mixed ? ''
+    : exchange ? ` · rates of ${formatDate(exchange.date)}`
+    : exchangeError ? ' · no exchange rates, so not converted' : ' · loading exchange rates…';
+  $('summaryValueNote').textContent = !found.length ? 'Identify cards to see their value'
+    : `${plural(priced.length, 'card')} priced${unpriced ? `, ${unpriced} without a price` : ''}${rateNote}`;
+  $('summaryValueNote').title = mixed && exchangeError ? exchangeError : '';
+
+  const selected = pages.filter((p) => state.selected.has(p.id));
+  const selectionValue = totalValue(selected);
+  $('summarySelection').hidden = !selected.length;
+  $('summarySelection').textContent = `Selected: ${plural(selected.length, 'card')}${selectionValue ? ` · ${selectionValue}` : ''}`;
+
+  const top = priced.sort((a, b) => sortValue(b) - sortValue(a)).slice(0, 8);
+  $('topCards').replaceChildren(...top.map((page) => {
+    const card = pricedTop(page);
+    const li = document.createElement('li');
+    li.innerHTML = '<button type="button"><span class="top-name"></span><span class="top-meta"></span><span class="top-price"></span></button>';
+    li.querySelector('.top-name').textContent = card.name;
+    li.querySelector('.top-meta').textContent = [card.set, card.number].filter(Boolean).join(' · ');
+    const local = convert(card.price, to);
+    li.querySelector('.top-price').textContent = formatPrice(card.price);
+    li.querySelector('.top-price').title = local != null && card.price.currency !== to ? `≈ ${formatPrice({ amount: local, currency: to })}` : '';
+    li.querySelector('button').addEventListener('click', () => {
+      if (narrow.matches) setSummaryOpen(false);
+      openViewer(page.id);
+    });
+    return li;
+  }));
+  $('topCardsEmpty').hidden = top.length > 0;
+}
+
+function setSummaryOpen(open, remember = true) {
+  $('summary').hidden = !open;
+  $('summaryScrim').hidden = !open || !narrow.matches;
+  $('summaryToggle').setAttribute('aria-expanded', String(open));
+  $('summaryToggle').classList.toggle('active', open);
+  $('summaryToggle').title = open ? 'Hide collection summary' : 'Show collection summary';
+  // On small screens it is a sheet over the page, so only remember the choice on wide ones.
+  if (remember && !narrow.matches) try { localStorage.setItem(SUMMARY_KEY, String(open)); } catch {}
+}
+
+/** Docked and open by default on wide screens; a closed sheet on small ones. */
+function resetSummary() {
+  let saved = null;
+  try { saved = localStorage.getItem(SUMMARY_KEY); } catch {}
+  setSummaryOpen(!narrow.matches && saved !== 'false', false);
+}
+
+const formatDate = (iso) => {
+  const date = iso && new Date(`${iso}T00:00:00`);
+  return date && !Number.isNaN(date.valueOf()) ? date.toLocaleDateString(undefined, { day: 'numeric', month: 'short' }) : 'today';
+};
+
+function initSummary() {
+  let currency = null;
+  try { currency = localStorage.getItem(CURRENCY_KEY); } catch {}
+  if ([...$('summaryCurrency').options].some((o) => o.value === currency)) $('summaryCurrency').value = currency;
+  $('summaryCurrency').addEventListener('change', () => {
+    try { localStorage.setItem(CURRENCY_KEY, $('summaryCurrency').value); } catch {}
+    renderSummary();
+  });
+  loadRates();
+  $('summaryToggle').innerHTML = icon('panel');
+  $('summaryClose').innerHTML = icon('close');
+  $('summaryToggle').addEventListener('click', () => setSummaryOpen($('summary').hidden));
+  $('summaryClose').addEventListener('click', () => setSummaryOpen(false));
+  $('summaryScrim').addEventListener('click', () => setSummaryOpen(false));
+  narrow.addEventListener('change', resetSummary);
+  resetSummary();
 }
 
 function step(delta) {
@@ -634,6 +800,7 @@ $('viewerDownload').innerHTML = icon('download');
 const viewerIcons = { rotl: 'rotateLeft', rotr: 'rotateRight', delete: 'trash', close: 'close', prev: 'prev', next: 'next' };
 for (const el of viewer.querySelectorAll('[data-viewer]')) el.innerHTML = icon(viewerIcons[el.dataset.viewer], el.classList.contains('nav') ? 20 : 16);
 
+initSummary();
 savedDevice = loadSettings().device ?? '';
 renderPaperHint();
 renderJob();

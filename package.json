@@ -1,19 +1,20 @@
 {
   "name": "feeder",
   "version": "1.0.0",
-  "description": "Scan from an HP ScanJet (or any macOS-supported scanner) straight into a web app.",
+  "description": "Scan from an HP ScanJet (or any scanner macOS or Windows supports) straight into a web app.",
   "type": "module",
   "private": true,
   "engines": {
     "node": ">=20"
   },
   "os": [
-    "darwin"
+    "darwin",
+    "win32"
   ],
   "scripts": {
-    "build": "sh scripts/build-helper.sh",
-    "prestart": "sh scripts/build-helper.sh",
+    "build": "node scripts/build-helper.js",
+    "prestart": "node scripts/build-helper.js",
     "start": "node server.js",
-    "scanner-info": "sh scripts/build-helper.sh && ./bin/scanhelper info"
+    "scanner-info": "node scripts/build-helper.js && node scripts/run-helper.js info"
   }
 }

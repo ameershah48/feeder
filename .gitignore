@@ -3,3 +3,4 @@ bin/
 scans/
 .DS_Store
 .env
+feeder-cards-*.csv
