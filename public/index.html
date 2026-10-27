@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Feeder</title>
+  <link rel="icon" href="/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <img src="/icon.svg" alt="" width="28" height="28">
+      <span>Feeder</span>
+    </div>
+    <div class="device-pill" id="devicePill" data-state="searching">
+      <span class="dot"></span>
+      <span id="devicePillText">Looking for scanners…</span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside class="panel" aria-label="Scan settings">
+      <form id="scanForm">
+        <fieldset class="settings" id="settings">
+          <div class="field">
+            <label for="device">Scanner</label>
+            <div class="row">
+              <select id="device" name="device"></select>
+              <button type="button" class="icon-btn" id="refreshDevices" title="Search for scanners" aria-label="Search for scanners"></button>
+            </div>
+            <p class="hint" id="deviceHint"></p>
+          </div>
+  
+          <fieldset class="field">
+            <legend>Sides</legend>
+            <div class="segmented">
+              <label><input type="radio" name="sides" value="single" checked><span>One-sided</span></label>
+              <label><input type="radio" name="sides" value="duplex"><span>Two-sided</span></label>
+            </div>
+          </fieldset>
+  
+          <fieldset class="field">
+            <legend>Color</legend>
+            <div class="segmented">
+              <label><input type="radio" name="mode" value="color" checked><span>Color</span></label>
+              <label><input type="radio" name="mode" value="gray"><span>Grayscale</span></label>
+              <label><input type="radio" name="mode" value="bw"><span>B&amp;W</span></label>
+            </div>
+          </fieldset>
+  
+          <div class="field">
+            <label for="resolution">Resolution</label>
+            <select id="resolution" name="resolution">
+              <option value="150">150 dpi · fast</option>
+              <option value="200">200 dpi</option>
+              <option value="300" selected>300 dpi · recommended</option>
+              <option value="600">600 dpi · best quality</option>
+            </select>
+          </div>
+  
+          <div class="field">
+            <label for="paper">Page size</label>
+            <select id="paper" name="paper">
+              <option value="a4">A4</option>
+              <option value="letter">Letter</option>
+              <option value="legal">Legal</option>
+              <option value="tcg">Trading card · 63 × 88 mm</option>
+            </select>
+            <p class="hint" id="paperHint"></p>
+          </div>
+        </fieldset>
+
+        <div class="scan-actions">
+          <button type="submit" class="scan-btn" id="scanBtn">
+            <span class="scan-btn-icon"></span>
+            <span id="scanBtnText">Scan</span>
+          </button>
+          <div class="job" id="jobBox" hidden>
+            <div class="job-line">
+              <span id="jobStatus">Starting…</span>
+              <button type="button" class="link-btn" id="cancelBtn">Cancel</button>
+            </div>
+            <div class="progress" id="jobProgress"><span></span></div>
+          </div>
+        </div>
+      </form>
+    </aside>
+
+    <main class="workspace">
+      <div class="toolbar" id="toolbar">
+        <div class="toolbar-info">
+          <strong id="pageCount">No pages</strong>
+          <span id="selectionInfo"></span>
+        </div>
+        <div class="toolbar-actions">
+          <button type="button" class="btn" id="selectAllBtn">Select all</button>
+          <span class="divider"></span>
+          <button type="button" class="icon-btn" id="rotateLeftBtn" title="Rotate selected left" aria-label="Rotate selected left" disabled></button>
+          <button type="button" class="icon-btn" id="rotateRightBtn" title="Rotate selected right" aria-label="Rotate selected right" disabled></button>
+          <button type="button" class="icon-btn danger" id="deleteBtn" title="Delete selected" aria-label="Delete selected" disabled></button>
+          <span class="divider"></span>
+          <select id="game" class="compact" aria-label="Card game" title="Card game">
+            <option value="">Any game</option>
+            <option value="pokemon">Pokémon</option>
+            <option value="magic">Magic: The Gathering</option>
+            <option value="onepiece">One Piece</option>
+            <option value="yugioh">Yu-Gi-Oh!</option>
+            <option value="lorcana">Lorcana</option>
+            <option value="digimon">Digimon</option>
+            <option value="gundam">Gundam</option>
+            <option value="hololive">Hololive</option>
+            <option value="riftbound">Riftbound</option>
+            <option value="ultraman">Ultraman</option>
+          </select>
+          <span class="identify-status" id="identifyStatus" hidden></span>
+          <button type="button" class="btn" id="identifyStopBtn" hidden>Stop</button>
+          <button type="button" class="btn primary" id="identifyBtn" disabled>Identify cards</button>
+          <button type="button" class="btn" id="exportBtn" disabled>Export CSV</button>
+        </div>
+      </div>
+
+      <div class="grid" id="grid" aria-live="polite"></div>
+
+      <div class="empty" id="empty">
+        <div class="empty-art" aria-hidden="true">
+          <div class="sheet s1"></div>
+          <div class="sheet s2"></div>
+          <div class="sheet s3"></div>
+        </div>
+        <h2>Ready to scan</h2>
+        <p>Put your pages face down in the feeder, choose your settings and press <b>Scan</b>. Each page shows up here as it comes through.</p>
+      </div>
+    </main>
+  </div>
+
+  <dialog class="viewer" id="viewer" aria-label="Page viewer">
+    <div class="viewer-bar">
+      <span id="viewerTitle">Page 1 of 1</span>
+      <div class="viewer-actions">
+        <button type="button" class="icon-btn" data-viewer="rotl" title="Rotate left" aria-label="Rotate left"></button>
+        <button type="button" class="icon-btn" data-viewer="rotr" title="Rotate right" aria-label="Rotate right"></button>
+        <a class="icon-btn" id="viewerDownload" title="Download image" aria-label="Download image" download></a>
+        <button type="button" class="icon-btn danger" data-viewer="delete" title="Delete page" aria-label="Delete page"></button>
+        <button type="button" class="icon-btn" data-viewer="close" title="Close (Esc)" aria-label="Close"></button>
+      </div>
+    </div>
+    <div class="viewer-body">
+      <div class="viewer-stage">
+        <button type="button" class="nav prev" data-viewer="prev" aria-label="Previous page"></button>
+        <img id="viewerImg" alt="">
+        <button type="button" class="nav next" data-viewer="next" aria-label="Next page"></button>
+      </div>
+      <aside class="viewer-match" id="viewerMatch" aria-label="Card match" hidden>
+        <h3 id="matchTitle"></h3>
+        <p class="match-reason" id="matchReason"></p>
+        <ol class="candidates" id="candidates"></ol>
+        <p class="match-note">Suggestions from the TCGSDK scanner beta. Check them before relying on them.</p>
+      </aside>
+    </div>
+  </dialog>
+
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
