@@ -1,7 +1,7 @@
 /* Card labels: 50 × 30 mm, black on white for thermal label printers. Shown at twice their size on screen. */
 
 :root {
-  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font: Arial, "Helvetica Neue", Helvetica, sans-serif;
   color-scheme: light;
 }
 
@@ -81,11 +81,9 @@ p { margin: 0; }
 }
 
 .logo {
-  font-size: 3.4mm;
-  font-style: italic;
-  font-weight: 900;
+  font-size: 2.6mm;
+  font-weight: 700;
   line-height: 1;
-  letter-spacing: -0.03em;
   white-space: nowrap;
   /* A long store name is cut short rather than pushing the date off the label. */
   min-width: 0;
@@ -101,7 +99,6 @@ p { margin: 0; }
   background: #000;
   color: #fff;
   font-weight: inherit;
-  transform: skewX(-8deg);
 }
 
 .label-date, .label-kicker, .label-price, .label-id {
@@ -112,29 +109,30 @@ p { margin: 0; }
 
 .label-date { flex: none; font-size: 1.7mm; letter-spacing: 0.1em; }
 
+/* Card details packed at the top, the price large at the bottom. */
 .label-info {
   display: flex;
   flex-direction: column;
-  justify-content: space-between;
+  gap: 0.5mm;
   min-width: 0;
-  padding: 1.6mm 1.6mm 1.5mm 2.4mm;
+  padding: 1.4mm 1.6mm 1.3mm 2.4mm;
 }
 
 .label-kicker, .label-set {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  line-height: 1.1;
 }
 
-.label-kicker { font-size: 1.75mm; letter-spacing: 0.16em; }
+.label-kicker { font-size: 1.6mm; font-weight: 400; letter-spacing: 0.06em; }
 
 .label-set {
-  margin-bottom: 0.4mm;
-  padding-left: 1.5mm;
+  margin-bottom: 0.3mm;
   color: #555;
-  font-size: 1.35mm;
+  font-size: 1.4mm;
   font-weight: 600;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
 }
 
@@ -143,15 +141,19 @@ p { margin: 0; }
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
   overflow: hidden;
-  padding-left: 1.1mm;
-  border-left: 0.45mm solid #000;
-  font-size: 2.6mm;
-  font-weight: 800;
-  line-height: 1.15;
+  font-size: 2.3mm;
+  font-weight: 700;
+  line-height: 1.1;
   overflow-wrap: anywhere;
 }
 
-.label-price { font-size: 1.75mm; letter-spacing: 0.12em; }
+.label-price {
+  margin-top: auto;
+  overflow: hidden;
+  font-size: 3.4mm;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
 
 .label-code {
   display: flex;
