@@ -191,10 +191,15 @@
         <h3 id="matchTitle"></h3>
         <p class="match-reason" id="matchReason"></p>
         <button type="button" class="btn match-retry" id="matchRetry" hidden>Try again</button>
-        <ol class="candidates" id="candidates"></ol>
-        <p class="match-note">Suggestions from the TCGSDK scanner beta. Check them before relying on them.</p>
+        <ol class="candidates" id="candidates" role="radiogroup" aria-label="Choose the matching card"></ol>
+        <p class="match-note">Suggestions from the TCGSDK scanner beta. Click the right one if the top match is wrong.</p>
       </aside>
     </div>
+  </dialog>
+
+  <dialog class="zoom" id="zoom" aria-label="Card image">
+    <img id="zoomImg" alt="">
+    <p id="zoomCaption"></p>
   </dialog>
 
   <div class="toasts" id="toasts" role="status" aria-live="polite"></div>

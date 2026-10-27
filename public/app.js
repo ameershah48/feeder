@@ -16,6 +16,7 @@ const PATHS = {
   scan: '<path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3"/><path d="M3 12h18"/>',
   spinner: '<path d="M21 12a9 9 0 1 1-6.22-8.56"/>',
   panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',
+  zoom: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4M11 8v6M8 11h6"/>',
 };
 
 const icon = (name, size = 16, stroke = 2) =>
@@ -303,7 +304,7 @@ function matchLabel(page) {
   const { match } = page;
   if (!match) return { text: '', tone: '', detail: '' };
   if (match.status === 'candidates') {
-    const top = match.candidates[0];
+    const top = chosenCandidate(match);
     return { text: top.name, tone: 'found', detail: [top.name, top.set, top.number].filter(Boolean).join(' · ') };
   }
   const detail = match.reason ?? '';
@@ -551,14 +552,72 @@ function renderMatch(page) {
   renderRetry(page, busy);
   // Rebuild only when the answer changes, so candidate images don't flicker on unrelated updates.
   const key = `${page.id}:${busy}:${match?.checkedAt}`;
-  if (panel.hidden || panel.dataset.key === key) return;
+  if (panel.hidden) return;
+  if (panel.dataset.key === key) {
+    markChosen(match);
+    return;
+  }
   panel.dataset.key = key;
 
   $('matchTitle').textContent = busy ? 'Identifying…' : MATCH_TITLES[match.status] ?? MATCH_TITLES.no_match;
   $('matchReason').textContent = busy ? '' : match.reason
     ?? (match.status === 'no_match' ? 'Try scanning it again, or choose the card game before identifying.' : '');
   $('candidates').replaceChildren(...(busy ? [] : match.candidates.map(candidateItem)));
+  if (!busy) markChosen(match);
 }
+
+/** The candidate the user picked for a page, or the top match when they haven't picked one. */
+function chosenCandidate(match) {
+  return match.candidates[match.chosen] ?? match.candidates[0];
+}
+
+function markChosen(match) {
+  const chosen = chosenCandidate(match);
+  $('candidates').querySelectorAll('.candidate').forEach((li, i) => {
+    const on = match.candidates[i] === chosen;
+    li.classList.toggle('chosen', on);
+    li.setAttribute('aria-checked', String(on));
+    li.tabIndex = on ? 0 : -1;
+  });
+}
+
+/** Makes `index` the card a page counts as, for the grid, the value summary and the export. */
+function chooseCandidate(index) {
+  const page = state.pages.find((p) => p.id === state.viewing);
+  if (page?.match?.status !== 'candidates' || page.match.chosen === index) return;
+  const previous = page.match.chosen;
+  page.match.chosen = index;
+  renderPages();
+  api('POST', '/api/pages/choose', { id: page.id, index }).catch((err) => {
+    page.match.chosen = previous;
+    renderPages();
+    toast('error', err.message);
+  });
+}
+
+$('candidates').addEventListener('click', (e) => {
+  if (e.target.closest('a[href], .candidate-zoom')) return; // these do their own thing
+  const li = e.target.closest('.candidate');
+  if (li) chooseCandidate([...li.parentNode.children].indexOf(li));
+});
+
+$('candidates').addEventListener('keydown', (e) => {
+  const li = e.target.closest('.candidate');
+  if (e.target !== li) return; // keys on the name link or zoom button act on those
+  const items = [...li.parentNode.children];
+  const index = items.indexOf(li);
+  const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
+  if (step) {
+    e.preventDefault();
+    e.stopPropagation(); // don't also flip the viewer to another page
+    const next = Math.min(items.length - 1, Math.max(0, index + step));
+    chooseCandidate(next);
+    items[next].focus();
+  } else if (e.key === ' ' || e.key === 'Enter') {
+    e.preventDefault();
+    chooseCandidate(index);
+  }
+});
 
 /** Pages without a usable answer can be sent again, e.g. after rotating them or picking the card game. */
 function renderRetry(page, busy) {
@@ -583,11 +642,13 @@ $('matchRetry').addEventListener('click', async () => {
 function candidateItem(candidate) {
   const li = document.createElement('li');
   li.className = 'candidate';
-  li.innerHTML = '<img alt="" loading="lazy" hidden><div><a class="candidate-name" target="_blank" rel="noopener noreferrer"></a><p class="candidate-meta"></p><p class="candidate-price"></p></div>';
-  const img = li.querySelector('img');
+  li.setAttribute('role', 'radio');
+  li.title = 'Use this card';
+  li.innerHTML = `<span class="candidate-thumb" hidden><img alt="" loading="lazy"><button type="button" class="candidate-zoom" title="Zoom in" aria-label="Zoom in">${icon('zoom', 14, 2.5)}</button></span><div><a class="candidate-name" target="_blank" rel="noopener noreferrer"></a><p class="candidate-meta"></p><p class="candidate-price"></p></div>`;
   if (candidate.image) {
-    img.src = candidate.image;
-    img.hidden = false;
+    li.querySelector('img').src = candidate.image;
+    li.querySelector('.candidate-thumb').hidden = false;
+    li.querySelector('.candidate-zoom').addEventListener('click', () => openZoom(candidate));
   }
   const name = li.querySelector('a');
   name.textContent = candidate.name;
@@ -598,6 +659,18 @@ function candidateItem(candidate) {
     : '';
   return li;
 }
+
+/** Shows a match's card image large, to compare it with the scan. */
+function openZoom(candidate) {
+  const img = $('zoomImg');
+  img.src = candidate.image;
+  img.alt = candidate.name;
+  $('zoomCaption').textContent = [candidate.name, candidate.set, candidate.number].filter(Boolean).join(' · ');
+  $('zoom').showModal();
+}
+
+$('zoom').addEventListener('click', () => $('zoom').close()); // anywhere, including the backdrop
+$('zoom').addEventListener('close', () => $('zoomImg').removeAttribute('src'));
 
 function formatPrice({ amount, currency }) {
   try {
@@ -633,8 +706,11 @@ function convert({ amount, currency: from }, to) {
   return r?.[from] && r?.[to] ? (amount / r[from]) * r[to] : null;
 }
 
-/** The top match of an identified page, when it has a price. */
-const pricedTop = (page) => (page.match?.status === 'candidates' && page.match.candidates[0]?.price ? page.match.candidates[0] : null);
+/** The chosen match of an identified page, when it has a price. */
+const pricedTop = (page) => {
+  const top = page.match?.status === 'candidates' ? chosenCandidate(page.match) : null;
+  return top?.price ? top : null;
+};
 
 /**
  * Totals prices in the chosen currency. TCGSDK quotes cards in different currencies, so prices are

@@ -80,7 +80,7 @@ async function refreshSummaries() {
     if (page.match?.status !== 'candidates' || page.match.candidates.every((c) => 'language' in c)) continue;
     try {
       const raw = JSON.parse(await fs.readFile(matchPath(page), 'utf8'));
-      page.match = { ...toMatch(raw), checkedAt: page.match.checkedAt };
+      page.match = { ...toMatch(raw), checkedAt: page.match.checkedAt, chosen: page.match.chosen };
       changed = true;
     } catch {} // no full answer kept; leave the old summary
   }
@@ -159,6 +159,18 @@ async function deletePages(ids) {
     fs.rm(thumbPath(p), { force: true }),
     fs.rm(matchPath(p), { force: true }),
   ]));
+}
+
+/** The candidate the user picked for a page, or the top match when they haven't picked one. */
+const chosenCandidate = (match) => match.candidates[match.chosen] ?? match.candidates[0];
+
+async function chooseCandidate(id, index) {
+  const match = pages.find((p) => p.id === id)?.match;
+  if (match?.status !== 'candidates') throw httpError(404, 'That card has no matches to choose from.');
+  if (!Number.isInteger(index) || !match.candidates[index]) throw httpError(400, 'No such match.');
+  match.chosen = index;
+  await saveIndex();
+  broadcast('pages', pages);
 }
 
 async function reorderPages(ids) {
@@ -553,12 +565,12 @@ function csvCell(value) {
   return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
 }
 
-/** One row per identified page, using its top match. Only the given pages when `wanted` isn't empty. */
+/** One row per identified page, using its chosen match. Only the given pages when `wanted` isn't empty. */
 function exportCsv(wanted) {
   const rows = pages
     .filter((p) => (!wanted.length || wanted.includes(p.id)) && p.match?.status === 'candidates')
-    .map(({ match: { candidates: [top] } }) =>
-      [top.id, top.name, top.set, top.price?.amount, top.price?.currency, top.language]);
+    .map(({ match }) => chosenCandidate(match))
+    .map((top) => [top.id, top.name, top.set, top.price?.amount, top.price?.currency, top.language]);
   return [CSV_HEADER, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }
 
@@ -671,6 +683,11 @@ async function handle(req, res) {
     case 'POST /api/scan/cancel': cancelScan(); return sendJson(res, 200, {});
     case 'POST /api/pages/delete': await deletePages(ids(await readJson(req))); return sendJson(res, 200, {});
     case 'POST /api/pages/order': await reorderPages(ids(await readJson(req))); return sendJson(res, 200, {});
+    case 'POST /api/pages/choose': {
+      const body = await readJson(req);
+      await chooseCandidate(body.id, body.index);
+      return sendJson(res, 200, {});
+    }
     case 'POST /api/pages/rotate': {
       const body = await readJson(req);
       const degrees = oneOf(Number(body.degrees), [90, -90, 180], 90);
