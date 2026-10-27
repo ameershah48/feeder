@@ -1,10 +1,29 @@
 // Card labels: one 50 × 30 mm label per identified card, with its TCGSDK ID as a Code 128 barcode.
-// The main page opens this with ?ids= (empty means every identified card) and ?currency=, which go on to /api/labels,
-// and ?store=, the store name printed in place of the TCGFeedr logo.
+// The main page opens this with ?ids= (empty means every identified card) and ?currency=, which go on to /api/labels.
+// The store name and branding are set in this page's bar and remembered in the browser.
 
 const $ = (id) => document.getElementById(id);
 
-const store = new URLSearchParams(location.search).get('store')?.trim().slice(0, 40);
+const LABEL_SETTINGS_KEY = 'feeder.labels';
+
+function loadLabelSettings() {
+  let saved = null;
+  try { saved = JSON.parse(localStorage.getItem(LABEL_SETTINGS_KEY)); } catch {}
+  if (!saved) {
+    // These used to be scan settings on the main page; carry them over once.
+    try {
+      const old = JSON.parse(localStorage.getItem('feeder.settings')) ?? {};
+      saved = { storeName: old.storeName, hideBrand: old.hideBrand };
+    } catch {}
+  }
+  $('storeName').value = typeof saved?.storeName === 'string' ? saved.storeName : '';
+  $('hideBrand').checked = saved?.hideBrand === true;
+}
+
+function saveLabelSettings() {
+  const settings = { storeName: $('storeName').value.trim(), hideBrand: $('hideBrand').checked };
+  try { localStorage.setItem(LABEL_SETTINGS_KEY, JSON.stringify(settings)); } catch {}
+}
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -14,15 +33,6 @@ function formatPrice({ amount, currency }) {
   } catch {
     return `${amount} ${currency}`;
   }
-}
-
-/** "27 OCT 2026 16:17" in local time; the label upper-cases it. */
-function stamp(iso) {
-  const date = new Date(iso);
-  if (Number.isNaN(date.valueOf())) return '';
-  const two = (n) => String(n).padStart(2, '0');
-  const month = date.toLocaleString('en', { month: 'short' });
-  return `${date.getDate()} ${month} ${date.getFullYear()} ${two(date.getHours())}:${two(date.getMinutes())}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -80,16 +90,24 @@ function barcodeSvg(text) {
 // ---------------------------------------------------------------------------
 // Labels
 
+/** Puts the store name, the TCGFeedr logo or nothing at the top of a label. */
+function renderBrand(el) {
+  const logo = el.querySelector('.logo');
+  const store = $('storeName').value.trim();
+  el.querySelector('.label-head').hidden = $('hideBrand').checked;
+  if (store) logo.textContent = store;
+  else logo.innerHTML = '<b>TCG</b>Feedr';
+  logo.title = store;
+}
+
+function renderBrands() {
+  $('storeName').disabled = $('hideBrand').checked; // a name has no effect without branding
+  for (const el of $('sheet').children) renderBrand(el);
+}
+
 function labelElement(label) {
   const el = $('labelTemplate').content.firstElementChild.cloneNode(true);
-  if (store) {
-    const logo = el.querySelector('.logo');
-    logo.textContent = store;
-    logo.title = store;
-  }
-  const date = el.querySelector('time');
-  date.dateTime = label.checkedAt ?? '';
-  date.textContent = stamp(label.checkedAt);
+  renderBrand(el);
   el.querySelector('.label-kicker').textContent = [label.number, label.rarity, label.language].filter(Boolean).join(' · ') || 'Card';
   el.querySelector('.label-set').textContent = label.set ?? '';
   el.querySelector('.label-name').textContent = label.name;
@@ -114,5 +132,14 @@ async function load() {
   }
 }
 
+for (const input of [$('storeName'), $('hideBrand')]) {
+  input.addEventListener('input', () => {
+    renderBrands();
+    saveLabelSettings();
+  });
+}
+
 $('printBtn').addEventListener('click', () => window.print());
+loadLabelSettings();
+renderBrands();
 load();

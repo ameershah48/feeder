@@ -95,7 +95,6 @@ function readSettings() {
   return {
     device: f.device.value, sides: f.sides.value, mode: f.mode.value, resolution: f.resolution.value,
     paper: f.paper.value, game: $('game').value, autoIdentify: $('autoIdentify').checked,
-    storeName: f.storeName.value.trim(),
   };
 }
 
@@ -103,10 +102,10 @@ function loadSettings() {
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(SETTINGS_KEY)) ?? {}; } catch {}
   const usesLetter = /-(US|CA|MX|PH|CO|CL|VE)$/i.test(navigator.language);
-  const values = { sides: 'single', mode: 'color', resolution: '300', paper: usesLetter ? 'letter' : 'a4', storeName: '', ...saved };
+  const values = { sides: 'single', mode: 'color', resolution: '300', paper: usesLetter ? 'letter' : 'a4', ...saved };
   if ([...$('game').options].some((o) => o.value === values.game)) $('game').value = values.game;
   $('autoIdentify').checked = values.autoIdentify === true;
-  for (const name of ['sides', 'mode', 'resolution', 'paper', 'storeName']) {
+  for (const name of ['sides', 'mode', 'resolution', 'paper']) {
     const field = form.elements[name];
     if (field instanceof HTMLSelectElement && ![...field.options].some((o) => o.value === values[name])) continue;
     field.value = values[name];
@@ -181,10 +180,6 @@ form.addEventListener('change', () => {
 });
 $('game').addEventListener('change', saveSettings);
 $('autoIdentify').addEventListener('change', saveSettings);
-$('storeName').addEventListener('input', saveSettings);
-$('storeName').addEventListener('keydown', (e) => {
-  if (e.key === 'Enter') e.preventDefault(); // it's in the scan form, but Enter here shouldn't start a scan
-});
 
 function renderPaperHint() {
   $('paperHint').textContent = form.elements.paper.value === 'tcg'
@@ -481,8 +476,6 @@ async function exportCsv() {
 /** Opens the labels of the selection (or of every identified card) in a new tab, priced in the summary's currency. */
 function printLabels() {
   const params = new URLSearchParams({ currency: $('summaryCurrency').value });
-  const store = $('storeName').value.trim();
-  if (store) params.set('store', store);
   // Everything selected means the same as nothing selected, and keeps the URL short for big collections.
   if (state.selected.size && state.selected.size < state.pages.length) params.set('ids', selectedIds().join(','));
   window.open(`/print.html?${params}`, '_blank');

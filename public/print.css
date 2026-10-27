@@ -45,6 +45,32 @@ p { margin: 0; }
 
 .bar button:disabled { opacity: 0.4; cursor: default; }
 
+.bar-controls { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 10px 18px; }
+.bar-field { display: flex; align-items: center; gap: 8px; font-size: 14px; color: #bbb; }
+.bar-field input {
+  width: 190px;
+  height: 36px;
+  padding: 0 10px;
+  border: 1px solid #444;
+  border-radius: 8px;
+  background: #222;
+  color: #fff;
+  font: 15px var(--font);
+}
+.bar-field input::placeholder { color: #777; }
+.bar-field input:disabled { opacity: 0.4; }
+.bar-check { display: flex; align-items: center; gap: 7px; font-size: 14px; cursor: pointer; }
+.bar-check input { margin: 0; width: 16px; height: 16px; accent-color: #fff; cursor: pointer; }
+.bar input:focus-visible, .bar button:focus-visible { outline: 2px solid #8ab4ff; outline-offset: 2px; }
+
+@media (max-width: 700px) {
+  .bar { flex-direction: column; align-items: stretch; padding: 14px 16px; }
+  .bar h1 { font-size: 20px; }
+  .bar-controls { justify-content: flex-start; }
+  .bar-field { flex: 1 1 100%; }
+  .bar-field input { flex: 1; width: auto; min-width: 0; }
+}
+
 .sheet {
   display: flex;
   flex-wrap: wrap;
@@ -57,9 +83,8 @@ p { margin: 0; }
 
 .label {
   zoom: 2;
-  display: grid;
-  grid-template-rows: 7mm minmax(0, 1fr);
-  grid-template-columns: minmax(0, 1fr) 21mm;
+  display: flex;
+  flex-direction: column;
   width: 50mm;
   height: 30mm;
   overflow: hidden;
@@ -70,14 +95,22 @@ p { margin: 0; }
   -webkit-print-color-adjust: exact;
 }
 
+/* The store name across the top, ruled off from the card; left out entirely when branding is hidden. */
 .label-head {
-  grid-column: 1 / -1;
+  flex: none;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 2mm;
-  padding: 0 2.4mm;
+  justify-content: center;
+  min-width: 0;
+  padding: 1.5mm 3mm 1.2mm;
   border-bottom: 0.3mm solid #000;
+}
+.label-head[hidden] { display: none; }
+
+.label-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 24mm;
 }
 
 .logo {
@@ -85,7 +118,7 @@ p { margin: 0; }
   font-weight: 700;
   line-height: 1;
   white-space: nowrap;
-  /* A long store name is cut short rather than pushing the date off the label. */
+  /* A long store name is cut short rather than running off the label. */
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -101,22 +134,22 @@ p { margin: 0; }
   font-weight: inherit;
 }
 
-.label-date, .label-kicker, .label-price, .label-id {
+.label-kicker, .label-price, .label-id {
   font-weight: 700;
   text-transform: uppercase;
   white-space: nowrap;
 }
 
-.label-date { flex: none; font-size: 1.7mm; letter-spacing: 0.1em; }
-
-/* Card details packed at the top, the price large at the bottom. */
+/* Store name, then the card name, its details and price on the left; the barcode in the middle of the right. */
 .label-info {
   display: flex;
   flex-direction: column;
-  gap: 0.5mm;
+  justify-content: center;
+  gap: 0.8mm;
   min-width: 0;
-  padding: 1.4mm 1.6mm 1.3mm 2.4mm;
+  padding: 2.6mm 1.4mm 2.6mm 3mm;
 }
+.label-head:not([hidden]) + .label-body .label-info { padding-block: 1.6mm 1.8mm; }
 
 .label-kicker, .label-set {
   overflow: hidden;
@@ -139,18 +172,19 @@ p { margin: 0; }
 .label-name {
   display: -webkit-box;
   -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  -webkit-line-clamp: 3;
   overflow: hidden;
-  font-size: 2.3mm;
+  font-size: 3mm;
   font-weight: 700;
-  line-height: 1.1;
+  line-height: 1.05;
   overflow-wrap: anywhere;
 }
 
 .label-price {
-  margin-top: auto;
+  margin-top: 0.8mm;
   overflow: hidden;
-  font-size: 3.4mm;
+  text-overflow: ellipsis;
+  font-size: 3.2mm;
   line-height: 1;
   letter-spacing: -0.01em;
 }
@@ -159,20 +193,21 @@ p { margin: 0; }
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  padding: 2.2mm 1.6mm 1.5mm;
-  border-left: 0.3mm solid #000;
+  justify-content: center;
+  gap: 0.8mm;
+  min-width: 0;
+  padding: 1.4mm 1.6mm; /* the sides keep a quiet zone so scanners find the barcode's ends */
 }
 
 .label-bars { width: 100%; }
-.label-bars svg { width: 100%; height: 9.5mm; }
+.label-bars svg { display: block; width: 100%; height: 15mm; }
 
 .label-id { font-size: 2mm; letter-spacing: 0.12em; }
 
 .label-none {
   display: grid;
   place-items: center;
-  height: 9.5mm;
+  height: 15mm;
   color: #666;
   font-size: 1.4mm;
   text-align: center;

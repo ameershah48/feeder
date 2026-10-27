@@ -10,7 +10,14 @@
 <body>
   <header class="bar">
     <h1 id="info">Loading labels…</h1>
-    <button type="button" id="printBtn" disabled>Print</button>
+    <div class="bar-controls">
+      <label class="bar-field">
+        <span>Store name</span>
+        <input type="text" id="storeName" maxlength="40" placeholder="TCGFeedr" autocomplete="organization" spellcheck="false">
+      </label>
+      <label class="bar-check"><input type="checkbox" id="hideBrand"><span>Hide branding</span></label>
+      <button type="button" id="printBtn" disabled>Print</button>
+    </div>
   </header>
 
   <main class="sheet" id="sheet"></main>
@@ -19,19 +26,20 @@
     <article class="label">
       <header class="label-head">
         <span class="logo"><b>TCG</b>Feedr</span>
-        <time class="label-date"></time>
       </header>
-      <div class="label-info">
-        <p class="label-kicker"></p>
-        <div>
-          <p class="label-set"></p>
+      <div class="label-body">
+        <div class="label-info">
           <p class="label-name"></p>
+          <div>
+            <p class="label-set"></p>
+            <p class="label-kicker"></p>
+          </div>
+          <p class="label-price"></p>
         </div>
-        <p class="label-price"></p>
-      </div>
-      <div class="label-code">
-        <span class="label-bars"></span>
-        <span class="label-id"></span>
+        <div class="label-code">
+          <span class="label-bars"></span>
+          <span class="label-id"></span>
+        </div>
       </div>
     </article>
   </template>
