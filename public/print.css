@@ -87,6 +87,10 @@ p { margin: 0; }
   line-height: 1;
   letter-spacing: -0.03em;
   white-space: nowrap;
+  /* A long store name is cut short rather than pushing the date off the label. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .logo b {
@@ -106,7 +110,7 @@ p { margin: 0; }
   white-space: nowrap;
 }
 
-.label-date { font-size: 1.7mm; letter-spacing: 0.1em; }
+.label-date { flex: none; font-size: 1.7mm; letter-spacing: 0.1em; }
 
 .label-info {
   display: flex;

@@ -1,7 +1,10 @@
 // Card labels: one 50 × 30 mm label per identified card, with its TCGSDK ID as a Code 128 barcode.
-// The main page opens this with ?ids= (empty means every identified card) and ?currency=, which go on to /api/labels.
+// The main page opens this with ?ids= (empty means every identified card) and ?currency=, which go on to /api/labels,
+// and ?store=, the store name printed in place of the TCGFeedr logo.
 
 const $ = (id) => document.getElementById(id);
+
+const store = new URLSearchParams(location.search).get('store')?.trim().slice(0, 40);
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -79,6 +82,11 @@ function barcodeSvg(text) {
 
 function labelElement(label) {
   const el = $('labelTemplate').content.firstElementChild.cloneNode(true);
+  if (store) {
+    const logo = el.querySelector('.logo');
+    logo.textContent = store;
+    logo.title = store;
+  }
   const date = el.querySelector('time');
   date.dateTime = label.checkedAt ?? '';
   date.textContent = stamp(label.checkedAt);
