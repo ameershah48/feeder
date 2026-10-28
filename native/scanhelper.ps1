@@ -241,22 +241,27 @@ function Invoke-Scan($settings) {
 
     $caps = [int](Get-Value $device.Properties $WIA_DPS_DOCUMENT_HANDLING_CAPABILITIES)
     $settings.feeder = ($caps -band $FEEDER) -and -not ($settings.source -eq 'flatbed' -and ($caps -band $FLATBED))
-    $duplex = $settings.feeder -and $settings.duplex -and ($caps -band $DUPLEX)
+    # Not $duplex: PowerShell names ignore case, so that would overwrite the $DUPLEX flag below with $true.
+    $twoSided = $settings.feeder -and $settings.duplex -and ($caps -band $DUPLEX)
     $item = Select-Item $device $(if ($settings.feeder) { 'feeder' } else { 'flatbed' })
 
     $select = if ($settings.feeder) { $FEEDER } else { $FLATBED }
-    if ($duplex) { $select = $select -bor $DUPLEX }
+    if ($twoSided) { $select = $select -bor $DUPLEX }
     if (-not (Set-Prop $device.Properties $WIA_DPS_DOCUMENT_HANDLING_SELECT $select)) {
         [void](Set-Prop $item.Properties $WIA_DPS_DOCUMENT_HANDLING_SELECT $select) # WIA 2.0 keeps it on the item
     }
-    # Leave WIA_DPS_PAGES alone: each Transfer() feeds one sheet, and some drivers reject 0 ("all pages").
+    if ($settings.duplex -and -not $twoSided) {
+        Emit @{ type = 'warning'; message = 'This scanner can only scan one side here, so only the fronts are scanned.' }
+    }
+    # Leave WIA_DPS_PAGES alone: each Transfer() returns one side (front, then back when two-sided),
+    # and the ScanJet Pro 2000 rejects any other value with 0x80070057 at the first Transfer().
 
     $resolution = Configure $device $item $settings
     $formatId = if ($settings.mode -eq 'bw') { $FORMAT_PNG } else { $FORMAT_JPEG }
     $extension = if ($settings.mode -eq 'bw') { 'png' } else { 'jpg' }
     $transferFormat = [string](Get-Value $item.Properties $WIA_IPA_FORMAT)
 
-    Emit @{ type = 'status'; message = 'Scanning…'; resolution = $resolution; duplex = [bool]$duplex }
+    Emit @{ type = 'status'; message = 'Scanning…'; resolution = $resolution; duplex = [bool]$twoSided }
 
     $pages = 0
     while ($true) {

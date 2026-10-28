@@ -331,17 +331,26 @@ select:disabled { opacity: 0.5; cursor: default; }
   flex: 1;
   overflow-y: auto;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   align-content: start;
-  gap: 26px 22px;
+  gap: 22px 18px;
   padding: 24px 20px 40px;
 }
 
+/* Each scan sits on its own tile, so neighbouring cards don't run together. */
 .page {
   position: relative;
   margin: 0;
+  padding: 8px 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  transition: border-color 0.15s;
   animation: arrive 0.35s cubic-bezier(0.2, 0.9, 0.3, 1.2);
 }
+.page.selected { border-color: var(--accent); }
+/* The back of a two-sided card: quieter, and labelled with its front's number. */
+.page.back { background: var(--surface-2); border-style: dashed; }
 @keyframes arrive { from { opacity: 0; transform: translateY(10px) scale(0.96); } }
 
 .page-thumb {
@@ -371,18 +380,18 @@ select:disabled { opacity: 0.5; cursor: default; }
   content: "";
   position: absolute;
   top: 0;
-  bottom: 24px;
+  bottom: 0;
   width: 3px;
   border-radius: 3px;
   background: var(--accent);
 }
-.page.drop-before::before { left: -13px; }
-.page.drop-after::after { right: -13px; }
+.page.drop-before::before { left: -11px; }
+.page.drop-after::after { right: -11px; }
 
 .page-check {
   position: absolute;
-  top: 8px;
-  left: 8px;
+  top: 14px;
+  left: 14px;
   width: 24px;
   height: 24px;
   display: grid;
@@ -403,8 +412,8 @@ select:disabled { opacity: 0.5; cursor: default; }
 
 .page-tools {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 14px;
+  right: 14px;
   display: flex;
   gap: 2px;
   padding: 3px;
@@ -456,6 +465,16 @@ select:disabled { opacity: 0.5; cursor: default; }
 .page-match[data-tone="none"] { color: var(--muted); font-weight: 450; }
 .page-match[data-tone="warn"] { color: var(--warn); }
 .page-match[data-tone="error"] { color: var(--danger); }
+
+select.page-condition {
+  display: block;
+  width: 100%;
+  margin-top: 6px;
+  color: var(--muted);
+  background-color: transparent;
+}
+select.page-condition:hover { color: var(--text); background-color: var(--surface-2); }
+select.page-condition[hidden] { display: none; }
 
 .page.pending .page-thumb { cursor: default; }
 .pending-sheet {
@@ -677,6 +696,28 @@ select:disabled { opacity: 0.5; cursor: default; }
 .candidate-price { color: var(--text); font-variant-numeric: tabular-nums; }
 .candidate-meta:empty, .candidate-price:empty { display: none; }
 
+.manual-toggle { margin-top: 12px; font-size: 13px; }
+.manual-toggle[hidden], .manual-search[hidden] { display: none; }
+.manual-search { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); }
+.manual-search > label { display: block; margin-bottom: 6px; font-size: 13px; font-weight: 600; }
+.manual-search input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+.manual-search input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.manual-search .btn { height: 34px; }
+.manual-search .hint:empty { display: none; }
+.manual-results { margin-top: 10px; }
+.manual-results .candidate-zoom { display: none; }
+.manual-results .candidate.busy { opacity: 0.5; cursor: progress; }
+
 /* ---------- Collection summary ---------- */
 
 .summary {
@@ -771,7 +812,7 @@ select.mini { width: auto; height: 26px; padding: 0 22px 0 8px; font-size: 12.5p
   .scan-actions { margin-top: 18px; }
   .topbar { padding: 10px 16px; }
   .toolbar { padding: 10px 16px; }
-  .grid { overflow: visible; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 20px 16px; padding: 16px 16px 32px; }
+  .grid { overflow: visible; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 18px 14px; padding: 16px 16px 32px; }
   .empty { position: static; padding: 48px 16px; }
   .viewer { width: 100vw; height: 100dvh; border-radius: 0; border: 0; }
   .viewer-stage { padding: 12px; }

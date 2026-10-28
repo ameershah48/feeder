@@ -108,7 +108,7 @@ function renderBrands() {
 function labelElement(label) {
   const el = $('labelTemplate').content.firstElementChild.cloneNode(true);
   renderBrand(el);
-  el.querySelector('.label-kicker').textContent = [label.number, label.rarity, label.language].filter(Boolean).join(' · ') || 'Card';
+  el.querySelector('.label-kicker').textContent = [label.number, label.rarity, label.language, label.condition].filter(Boolean).join(' · ') || 'Card';
   el.querySelector('.label-set').textContent = label.set ?? '';
   el.querySelector('.label-name').textContent = label.name;
   el.querySelector('.label-price').textContent = label.price ? formatPrice(label.price) : 'No price';

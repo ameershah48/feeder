@@ -209,6 +209,16 @@
         <button type="button" class="btn match-retry" id="matchRetry" hidden>Try again</button>
         <ol class="candidates" id="candidates" role="listbox" aria-label="Possible matches"></ol>
         <p class="match-hint" id="matchHint" hidden><kbd>↑</kbd> <kbd>↓</kbd> compare matches · <kbd>Enter</kbd> use the one shown</p>
+        <button type="button" class="link-btn manual-toggle" id="manualToggle" hidden>Not the right card? Search for it</button>
+        <form class="manual-search" id="manualSearch" role="search" hidden>
+          <label for="manualQuery">Search TCGSDK</label>
+          <div class="row">
+            <input type="search" id="manualQuery" placeholder="Card name, or number like 199/165" autocomplete="off" spellcheck="false">
+            <button type="submit" class="btn" id="manualSubmit">Search</button>
+          </div>
+          <p class="hint" id="manualStatus"></p>
+          <ol class="candidates manual-results" id="manualResults" aria-label="Search results"></ol>
+        </form>
         <p class="match-note">Suggestions from the TCGSDK scanner beta. Check them before relying on them.</p>
       </aside>
     </div>

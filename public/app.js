@@ -22,6 +22,15 @@ const PATHS = {
 const icon = (name, size = 16, stroke = 2) =>
   `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${stroke}" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${PATHS[name]}</svg>`;
 
+// Card conditions, best first, as the server stores them. A page without one counts as Near Mint.
+const CONDITIONS = {
+  NM: 'Near Mint',
+  LP: 'Lightly Played',
+  MP: 'Moderately Played',
+  HP: 'Heavily Played',
+  DMG: 'Damaged',
+};
+
 const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const pageUrl = (page) => `/scans/pages/${page.file}?v=${page.rev}`;
 const thumbUrl = (page) => `/scans/thumbs/${page.id}.jpg?v=${page.rev}`;
@@ -238,8 +247,21 @@ function renderJob() {
 // ---------------------------------------------------------------------------
 // Page grid
 
+/** Card numbers for the grid: a two-sided back shares its front's number, so a pair reads as one card. */
+function cardNumbers() {
+  const numbers = new Map();
+  let n = 0;
+  for (const page of state.pages) {
+    numbers.set(page.id, page.side === 'back' ? numbers.get(page.front) ?? n : ++n);
+  }
+  return numbers;
+}
+
+const isBack = (page) => page.side === 'back';
+
 function renderPages() {
-  const wanted = state.pages.map((page, i) => updateCard(page, i));
+  const numbers = cardNumbers();
+  const wanted = state.pages.map((page, i) => updateCard(page, i, numbers.get(page.id)));
   if (state.job) wanted.push(updatePendingCard());
   // Only move nodes that are out of place, so existing cards don't re-run their entry animation.
   wanted.forEach((el, i) => {
@@ -256,7 +278,7 @@ function renderPages() {
   if (state.viewing) renderViewer();
 }
 
-function updateCard(page, index) {
+function updateCard(page, index, number) {
   let card = cards.get(page.id);
   if (!card) {
     card = document.createElement('figure');
@@ -272,7 +294,10 @@ function updateCard(page, index) {
         <button type="button" class="danger" data-act="delete" title="Delete" aria-label="Delete">${icon('trash')}</button>
       </div>
       <figcaption></figcaption>
-      <p class="page-match"></p>`;
+      <p class="page-match"></p>
+      <select class="page-condition mini" title="Card condition"></select>`;
+    card.querySelector('.page-condition')
+      .append(...Object.entries(CONDITIONS).map(([value, name]) => new Option(name, value)));
     cards.set(page.id, card);
   }
   const img = card.querySelector('img');
@@ -284,7 +309,14 @@ function updateCard(page, index) {
   check.checked = selected;
   check.setAttribute('aria-label', `Select page ${index + 1}`);
   card.querySelector('.page-thumb').setAttribute('aria-label', `Open page ${index + 1}`);
-  card.querySelector('figcaption').textContent = index + 1;
+  const back = isBack(page);
+  card.classList.toggle('back', back);
+  card.querySelector('figcaption').textContent = back ? `${number} · back` : number;
+  // The condition belongs to the card, so a two-sided pair has one, on its front.
+  const condition = card.querySelector('.page-condition');
+  condition.hidden = back;
+  condition.value = page.condition in CONDITIONS ? page.condition : 'NM';
+  condition.setAttribute('aria-label', `Condition of card ${number}`);
   card.classList.toggle('selected', selected);
   card.classList.toggle('checking', state.identify?.current === page.id);
 
@@ -341,7 +373,10 @@ function renderToolbar() {
 
   // With nothing selected, Identify checks every page that has no answer yet.
   const run = state.identify;
-  const toCheck = count || state.pages.filter((p) => !p.match || p.match.status === 'error').length;
+  // Card backs are never sent: they all look alike.
+  const toCheck = count
+    ? state.pages.filter((p) => state.selected.has(p.id) && !isBack(p)).length
+    : state.pages.filter((p) => !isBack(p) && (!p.match || p.match.status === 'error')).length;
   const button = $('identifyBtn');
   button.hidden = Boolean(run);
   button.disabled = !toCheck;
@@ -398,8 +433,13 @@ grid.addEventListener('click', (e) => {
 });
 
 grid.addEventListener('change', (e) => {
-  if (!e.target.matches('.page-check input')) return;
-  toggleSelection(e.target.closest('.page').dataset.id, false);
+  const { id } = e.target.closest('.page').dataset;
+  if (e.target.matches('.page-check input')) toggleSelection(id, false);
+  // Setting the condition of a selected card sets it for the whole selection.
+  else if (e.target.matches('.page-condition')) {
+    const ids = state.selected.has(id) ? state.pages.filter((p) => state.selected.has(p.id) && !isBack(p)).map((p) => p.id) : [id];
+    setCondition(ids, e.target.value);
+  }
 });
 
 $('selectAllBtn').addEventListener('click', () => {
@@ -447,6 +487,19 @@ async function removePages(ids) {
   try {
     await api('POST', '/api/pages/delete', { ids });
   } catch (err) {
+    toast('error', err.message);
+  }
+}
+
+async function setCondition(ids, condition) {
+  const previous = new Map(state.pages.filter((p) => ids.includes(p.id)).map((p) => [p, p.condition]));
+  for (const page of previous.keys()) page.condition = condition;
+  renderPages();
+  try {
+    await api('POST', '/api/pages/condition', { ids, condition });
+  } catch (err) {
+    for (const [page, value] of previous) page.condition = value;
+    renderPages();
     toast('error', err.message);
   }
 }
@@ -577,16 +630,89 @@ function renderMatch(page) {
   if (panel.hidden) return;
   if (panel.dataset.key !== key) {
     panel.dataset.key = key;
+    resetManual();
     // A new page or a new answer: start by showing the card it counts as.
     shown = comparable(page) ? page.match.candidates.indexOf(chosenCandidate(page.match)) : 0;
-    $('matchTitle').textContent = busy ? 'Identifying…' : MATCH_TITLES[match.status] ?? MATCH_TITLES.no_match;
+    $('matchTitle').textContent = busy ? 'Identifying…'
+      : match.manual ? 'Found by search' : MATCH_TITLES[match.status] ?? MATCH_TITLES.no_match;
     $('matchReason').textContent = busy ? '' : match.reason
       ?? (match.status === 'no_match' ? 'Try scanning it again, or choose the card game before identifying.' : '');
     $('candidates').replaceChildren(...(busy ? [] : match.candidates.map(candidateItem)));
   }
   $('matchHint').hidden = !comparable(page);
   if (comparable(page)) markCandidates(page.match);
+  renderManual(page, busy);
 }
+
+// ---------------------------------------------------------------------------
+// Manual search, for cards the scanner couldn't recognise or got wrong
+
+let manualOpen = false; // opened by hand on a page that already has matches
+
+function resetManual() {
+  manualOpen = false;
+  $('manualQuery').value = '';
+  $('manualStatus').textContent = '';
+  $('manualResults').replaceChildren();
+}
+
+function renderManual(page, busy) {
+  const status = page.match?.status;
+  // Without a usable match the search is always there; with one, it opens on request.
+  const open = !busy && (['retake', 'no_match', 'error'].includes(status) || (status === 'candidates' && manualOpen));
+  $('manualSearch').hidden = !open;
+  $('manualToggle').hidden = busy || open || status !== 'candidates';
+}
+
+$('manualToggle').addEventListener('click', () => {
+  manualOpen = true;
+  renderManual(viewedPage(), false);
+  $('manualQuery').focus();
+});
+
+$('manualSearch').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const q = $('manualQuery').value.trim();
+  if (q.length < 2) {
+    $('manualStatus').textContent = 'Type at least 2 characters.';
+    return;
+  }
+  const id = state.viewing;
+  $('manualSubmit').disabled = true;
+  $('manualStatus').textContent = 'Searching…';
+  try {
+    const { results, total } = await api('GET', `/api/search?${new URLSearchParams({ q })}`);
+    if (state.viewing !== id) return;
+    $('manualResults').replaceChildren(...results.map((candidate) => {
+      const li = candidateItem(candidate);
+      li.dataset.product = candidate.id;
+      return li;
+    }));
+    // TCGSDK matches the name or the number, not both at once.
+    $('manualStatus').textContent = !results.length ? 'No cards found. Search by name alone, or by the full card number (e.g. 199/165).'
+      : total > results.length ? `Showing ${results.length} of ${total}. Try the full card number to narrow it down.`
+      : `${plural(results.length, 'card')} found. Click one to use it.`;
+  } catch (err) {
+    if (state.viewing === id) $('manualStatus').textContent = err.message;
+  } finally {
+    $('manualSubmit').disabled = false;
+  }
+});
+
+$('manualResults').addEventListener('click', async (e) => {
+  const li = e.target.closest('.candidate');
+  if (!li || li.classList.contains('busy')) return;
+  const id = state.viewing;
+  li.classList.add('busy');
+  $('manualStatus').textContent = 'Getting the card…';
+  try {
+    await api('POST', '/api/pages/manual', { id, product: Number(li.dataset.product) });
+    // The pages event that follows shows the card as the page's match.
+  } catch (err) {
+    li.classList.remove('busy');
+    if (state.viewing === id) $('manualStatus').textContent = err.message;
+  }
+});
 
 /** The candidate the user picked for a page, or the top match when they haven't picked one. */
 function chosenCandidate(match) {
@@ -769,10 +895,11 @@ function renderSummary() {
   const { pages } = state;
   const found = pages.filter((p) => p.match?.status === 'candidates');
   const priced = found.filter(pricedTop);
-  $('statCards').textContent = pages.length;
+  const cardsOnly = pages.filter((p) => !isBack(p)); // a two-sided pair is one card
+  $('statCards').textContent = cardsOnly.length;
   $('statFound').textContent = found.length;
-  $('statMissing').textContent = pages.filter((p) => ['no_match', 'retake'].includes(p.match?.status)).length;
-  $('statPending').textContent = pages.filter((p) => !p.match || p.match.status === 'error').length;
+  $('statMissing').textContent = cardsOnly.filter((p) => ['no_match', 'retake'].includes(p.match?.status)).length;
+  $('statPending').textContent = cardsOnly.filter((p) => !p.match || p.match.status === 'error').length;
 
   $('summaryValue').textContent = totalValue(pages) || '—';
   const unpriced = found.length - priced.length;
@@ -876,6 +1003,7 @@ viewer.addEventListener('click', async (e) => {
 });
 
 viewer.addEventListener('keydown', (e) => {
+  if (e.target.closest('input, select, textarea')) return; // typing a search
   if (e.key === 'ArrowLeft') step(-1);
   if (e.key === 'ArrowRight') step(1);
   if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {

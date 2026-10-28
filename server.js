@@ -119,12 +119,25 @@ async function imageSize(file) {
   };
 }
 
+/** Trims the feeder background off a card scan in place. Returns whether it did; a failed crop keeps the scan whole. */
+async function cropCard(file) {
+  if (!WINDOWS) return false; // sips can't find the card's edges
+  try {
+    const { stdout } = await run(IMAGE_TOOL, ['crop', file]);
+    return JSON.parse(stdout).cropped === true;
+  } catch (err) {
+    console.warn(`Could not crop ${file}: ${err.message}`);
+    return false;
+  }
+}
+
 /** Moves a freshly scanned file into the store and announces it. */
 async function ingest(src, meta) {
   const id = newId();
   const file = id + (path.extname(src).toLowerCase() === '.png' ? '.png' : '.jpg');
   await fs.rename(src, path.join(PAGES_DIR, file));
   const page = { id, file, rev: 0, createdAt: new Date().toISOString(), ...meta };
+  if (meta.paper === 'tcg') page.cropped = await cropCard(path.join(PAGES_DIR, file));
   await makeThumb(page);
   Object.assign(page, await imageSize(path.join(PAGES_DIR, file)));
   pages.push(page);
@@ -169,6 +182,24 @@ async function chooseCandidate(id, index) {
   if (match?.status !== 'candidates') throw httpError(404, 'That card has no matches to choose from.');
   if (!Number.isInteger(index) || !match.candidates[index]) throw httpError(400, 'No such match.');
   match.chosen = index;
+  await saveIndex();
+  broadcast('pages', pages);
+}
+
+// Card conditions, best first. A page without one counts as Near Mint.
+const CONDITIONS = {
+  NM: 'Near Mint',
+  LP: 'Lightly Played',
+  MP: 'Moderately Played',
+  HP: 'Heavily Played',
+  DMG: 'Damaged',
+};
+const conditionOf = (page) => (page.condition in CONDITIONS ? page.condition : 'NM');
+
+async function setCondition(ids, condition) {
+  if (!(condition in CONDITIONS)) throw httpError(400, 'Unknown condition.');
+  // A back belongs to its front's card, so only fronts carry a condition.
+  for (const page of pages) if (ids.includes(page.id) && page.side !== 'back') page.condition = condition;
   await saveIndex();
   broadcast('pages', pages);
 }
@@ -225,6 +256,9 @@ function startScan(body) {
   let failure = null;
   let stderr = '';
   let ingesting = Promise.resolve(); // keeps pages in feeder order
+  // Two-sided, the feeder delivers front, back, front, back… The helper says whether the scanner really scans both.
+  let twoSided = settings.duplex;
+  const fronts = new Map(); // page index -> id, so each back can point at its front
 
   readline.createInterface({ input: proc.stdout }).on('line', (line) => {
     let event;
@@ -232,18 +266,28 @@ function startScan(body) {
     switch (event.type) {
       case 'status':
         job.status = event.message;
+        if (typeof event.duplex === 'boolean') twoSided = event.duplex;
         break;
       case 'progress':
         job.percent = event.percent;
         break;
-      case 'page':
+      case 'page': {
         job.count = event.index;
         job.percent = null;
+        const meta = { scan: id, resolution: event.resolution, mode: settings.mode, paper: settings.paper };
+        if (twoSided) meta.side = event.index % 2 ? 'front' : 'back';
         ingesting = ingesting
-          .then(() => ingest(event.path, { scan: id, resolution: event.resolution, mode: settings.mode }))
-          .then((page) => { if (settings.identify) queueIdentify(page, settings.game); })
+          .then(() => {
+            if (meta.side === 'back') meta.front = fronts.get(event.index - 1) ?? null;
+            return ingest(event.path, meta);
+          })
+          .then((page) => {
+            if (page.side === 'front') fronts.set(event.index, page.id);
+            if (settings.identify && page.side !== 'back') queueIdentify(page, settings.game);
+          })
           .catch((err) => notify('error', `Could not save page ${event.index}: ${err.message}`));
         break;
+      }
       case 'warning':
         notify('warning', event.message);
         break;
@@ -285,14 +329,18 @@ const MAX_UPLOAD_PIXELS = 40e6;
 const MAX_RETRY_WAIT = 120; // seconds; a longer Retry-After means the daily allowance is gone
 
 /** Pages that don't have a usable answer yet. */
-const unidentified = () => pages.filter((p) => !p.match || p.match.status === 'error');
+const unidentified = () => pages.filter((p) => p.side !== 'back' && (!p.match || p.match.status === 'error'));
 
 async function startIdentify(body) {
   if (identifying) throw httpError(409, 'Cards are already being identified.');
   if (!TCGSDK_KEY) throw httpError(400, 'Add your TCGSDK API token to a .env file as TCGSDK_API_KEY=… and restart Feeder.');
   const wanted = ids(body);
-  const queue = wanted.length ? pages.filter((p) => wanted.includes(p.id)) : unidentified();
-  if (!queue.length) throw httpError(400, 'Every card has been identified. Select cards to check them again.');
+  // Card backs all look alike, so sending them would only use up scans.
+  const queue = wanted.length ? pages.filter((p) => wanted.includes(p.id) && p.side !== 'back') : unidentified();
+  if (!queue.length) {
+    throw httpError(400, wanted.length ? 'Card backs can\'t be identified. Select the fronts.'
+      : 'Every card has been identified. Select cards to check them again.');
+  }
   const game = oneOf(body.game, GAMES, '');
 
   // Claim the run before the check, so cards scanned meanwhile join it instead of starting another.
@@ -417,7 +465,7 @@ async function identifyPage(page, run) {
     const form = new FormData();
     form.append('image', image, image.type === 'image/png' ? 'card.png' : 'card.jpg');
     if (run.game) form.append('game', run.game);
-    form.append('cropped', '0'); // scans keep a margin around the card
+    form.append('cropped', page.cropped ? '1' : '0'); // uncropped scans keep a margin around the card
 
     let res;
     try {
@@ -513,6 +561,70 @@ function toCandidate(candidate) {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Manual search, for cards the scanner can't recognise. GET /products?q= isn't in TCGSDK's reference yet;
+// it matches names and card numbers but leaves the set and prices out, so a pick is fetched again in full.
+
+async function tcgsdkGet(pathAndQuery) {
+  if (!TCGSDK_KEY) throw httpError(400, 'Add your TCGSDK API token to a .env file as TCGSDK_API_KEY=… and restart Feeder.');
+  let res;
+  try {
+    res = await fetch(`${TCGSDK_API}${pathAndQuery}`, {
+      headers: { Authorization: `Bearer ${TCGSDK_KEY}`, Accept: 'application/json' },
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch (err) {
+    throw httpError(502, `Could not reach TCGSDK: ${err.cause?.message ?? err.message}`);
+  }
+  const data = await res.json().catch(() => null);
+  if (res.ok) return data;
+  const message = firstText(...Object.values(data?.errors ?? {}).flat(), data?.message, data?.error) ?? `HTTP ${res.status}`;
+  if (res.status === 401) throw httpError(400, 'TCGSDK did not accept the API token. Check TCGSDK_API_KEY in .env and restart Feeder.');
+  if (res.status === 404) throw httpError(404, 'TCGSDK has no such card.');
+  if (res.status === 422) throw httpError(400, message);
+  if (res.status === 429) {
+    const seconds = Number(res.headers.get('retry-after'));
+    throw httpError(429, `TCGSDK's request limit is used up${seconds > 0 ? `. Try again in ${Math.ceil(seconds)}s` : ''}.`);
+  }
+  throw httpError(502, `TCGSDK error (${res.status}): ${message}`);
+}
+
+async function searchCards(query) {
+  const q = query?.trim() ?? '';
+  if (q.length < 2) throw httpError(400, 'Type at least 2 characters to search.');
+  const data = await tcgsdkGet(`/products?${new URLSearchParams({ q, per_page: '30' })}`);
+  const results = (Array.isArray(data?.data) ? data.data : []).map((product) => toCandidate({ product }));
+  return { results, total: data?.meta?.total ?? results.length };
+}
+
+/** The card's page on tcgsdk.com, in its own language. */
+function browseUrl(product) {
+  const { game, set } = product ?? {};
+  if (!game?.slug || !set?.code || product.id == null) return null;
+  const lang = set.language && !set.language.is_default ? `?lang=${encodeURIComponent(set.language.language)}` : '';
+  return tcgsdkUrl(`/browse/${encodeURIComponent(game.slug)}/sets/${encodeURIComponent(set.code)}/cards/${product.id}${lang}`);
+}
+
+/** Makes a card found by hand the page's only match. */
+async function chooseProduct(id, productId) {
+  const page = pages.find((p) => p.id === id);
+  if (!page) throw httpError(404, 'That page no longer exists.');
+  if (!Number.isInteger(productId)) throw httpError(400, 'No such card.');
+  if (identifying?.current === id) throw httpError(409, 'This card is being identified. Wait for it to finish.');
+  const product = (await tcgsdkGet(`/products/${productId}`))?.data;
+  if (!pages.includes(page)) return; // deleted during the request
+  page.match = {
+    status: 'candidates',
+    reason: null,
+    candidates: [toCandidate({ product, url: browseUrl(product) })],
+    chosen: 0,
+    manual: true,
+    checkedAt: new Date().toISOString(),
+  };
+  await saveIndex();
+  broadcast('pages', pages);
+}
+
 function firstText(...values) {
   for (const value of values) {
     if (typeof value === 'number' || (typeof value === 'string' && value.trim())) return String(value).trim();
@@ -558,7 +670,7 @@ async function getRates() {
 
 // Each price is also given converted to these, rounded to the currency's usual decimals.
 const CSV_CURRENCIES = { USD: 2, MYR: 2, JPY: 0 };
-const CSV_HEADER = ['TCGSDK ID', 'Name', 'Set', 'Price', 'Currency', 'Language',
+const CSV_HEADER = ['TCGSDK ID', 'Name', 'Set', 'Condition', 'Price', 'Currency', 'Language',
   ...Object.keys(CSV_CURRENCIES).map((c) => `price_${c.toLowerCase()}`)];
 
 /** `price` in `to` with the rates from getRates(), or null when either currency has no rate. */
@@ -586,8 +698,8 @@ async function exportCsv(wanted) {
   // Without exchange rates the converted columns stay empty rather than failing the export.
   const table = (await getRates().catch(() => null))?.rates;
   const rows = identified(wanted)
-    .map(({ match }) => chosenCandidate(match))
-    .map((top) => [top.id, top.name, top.set, top.price?.amount, top.price?.currency, top.language,
+    .map((page) => [chosenCandidate(page.match), CONDITIONS[conditionOf(page)]])
+    .map(([top, condition]) => [top.id, top.name, top.set, condition, top.price?.amount, top.price?.currency, top.language,
       ...Object.entries(CSV_CURRENCIES).map(([to, digits]) => convertPrice(top.price, to, table)?.toFixed(digits))]);
   return [CSV_HEADER, ...rows].map((row) => row.map(csvCell).join(',')).join('\r\n') + '\r\n';
 }
@@ -603,7 +715,8 @@ function sendCsv(res, csv) {
 /** One label per identified page, priced in `currency` when there's a rate for it and in TCGSDK's currency otherwise. */
 async function cardLabels(wanted, currency) {
   const table = (await getRates().catch(() => null))?.rates;
-  return identified(wanted).map(({ match }) => {
+  return identified(wanted).map((page) => {
+    const { match } = page;
     const top = chosenCandidate(match);
     const amount = convertPrice(top.price, currency, table);
     return {
@@ -613,6 +726,7 @@ async function cardLabels(wanted, currency) {
       number: top.number,
       rarity: top.rarity,
       language: top.language,
+      condition: conditionOf(page),
       price: amount == null ? top.price && { amount: top.price.amount, currency: top.price.currency } : { amount, currency },
       checkedAt: match.checkedAt,
     };
@@ -728,6 +842,17 @@ async function handle(req, res) {
       await chooseCandidate(body.id, body.index);
       return sendJson(res, 200, {});
     }
+    case 'POST /api/pages/condition': {
+      const body = await readJson(req);
+      await setCondition(ids(body), body.condition);
+      return sendJson(res, 200, {});
+    }
+    case 'POST /api/pages/manual': {
+      const body = await readJson(req);
+      await chooseProduct(body.id, body.product);
+      return sendJson(res, 200, {});
+    }
+    case 'GET /api/search': return sendJson(res, 200, await searchCards(searchParams.get('q')));
     case 'POST /api/pages/rotate': {
       const body = await readJson(req);
       const degrees = oneOf(Number(body.degrees), [90, -90, 180], 90);
