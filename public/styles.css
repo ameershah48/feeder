@@ -314,15 +314,71 @@ select:focus-visible, button:focus-visible, a:focus-visible, .segmented input:fo
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg) 85%, var(--surface));
 }
-.toolbar-info { display: flex; align-items: baseline; gap: 8px; }
+.toolbar-info { display: flex; align-items: baseline; gap: 8px; flex: none; white-space: nowrap; }
 .toolbar-info span { color: var(--muted); }
-.toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
-.divider { width: 1px; height: 22px; margin: 0 4px; background: var(--border); }
-select.compact { width: auto; height: 34px; }
+/* Two groups that wrap as wholes: page tools, then identify and export. */
+.toolbar-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; min-width: 0; }
+.toolbar-group { display: flex; align-items: center; gap: 4px; }
+.toolbar .btn { height: 32px; padding: 0 12px; white-space: nowrap; }
+.toolbar .icon-btn { width: 32px; height: 32px; }
+.divider { width: 1px; height: 20px; margin: 0 4px; background: var(--border); }
+select.compact { width: auto; height: 32px; }
+/* Long game names are cut short instead of widening the toolbar. */
+.toolbar select.compact { max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 select:disabled { opacity: 0.5; cursor: default; }
 .auto-toggle { display: inline-flex; align-items: center; gap: 6px; padding: 0 4px; font-size: 13px; color: var(--muted); cursor: pointer; white-space: nowrap; }
 .auto-toggle input { margin: 0; accent-color: var(--accent); cursor: pointer; }
-.identify-status { padding: 0 4px; font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; }
+/* Statuses like "Waiting 40s for TCGSDK's per-minute limit…" are cut short; the full text is in the tooltip. */
+.identify-status {
+  max-width: 200px;
+  overflow: hidden;
+  padding: 0 4px;
+  font-size: 13px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.btn.busy { cursor: progress; }
+
+/* ---------- Export dialog ---------- */
+
+.export-dialog {
+  width: min(420px, 100vw - 32px);
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+.export-dialog::backdrop { background: rgba(10, 12, 16, 0.6); backdrop-filter: blur(3px); }
+.export-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 16px; }
+.export-head h2 { margin: 0; font-size: 17px; font-weight: 640; }
+.export-scope { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
+.export-options { display: flex; flex-direction: column; gap: 8px; }
+.export-option {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+.export-option:hover:not(:disabled) { border-color: var(--accent); background: var(--accent-soft); }
+.export-option:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.export-option:disabled { opacity: 0.45; cursor: default; }
+.export-option strong { display: block; font-weight: 600; }
+.export-icon { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 10px; background: var(--surface-2); color: var(--accent); }
+.export-detail { display: block; margin-top: 2px; color: var(--muted); font-size: 12.5px; }
 .identify-status[hidden], .btn[hidden] { display: none; }
 
 /* ---------- Page grid ---------- */
@@ -352,6 +408,26 @@ select:disabled { opacity: 0.5; cursor: default; }
 /* The back of a two-sided card: quieter, and labelled with its front's number. */
 .page.back { background: var(--surface-2); border-style: dashed; }
 @keyframes arrive { from { opacity: 0; transform: translateY(10px) scale(0.96); } }
+
+/* A two-sided card: front and back side by side on one tile, two columns wide. */
+.page.pair { grid-column: span 2; }
+.page-sides { display: flex; gap: 8px; }
+.page-sides .page-thumb { flex: 1; min-width: 0; }
+.back-thumb { position: relative; }
+.back-thumb::after {
+  content: "Back";
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: rgba(10, 12, 16, 0.65);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 560;
+  pointer-events: none;
+}
 
 .page-thumb {
   display: flex;
@@ -466,7 +542,7 @@ select:disabled { opacity: 0.5; cursor: default; }
 .page-match[data-tone="warn"] { color: var(--warn); }
 .page-match[data-tone="error"] { color: var(--danger); }
 
-select.page-condition {
+.page select.page-condition {
   display: block;
   width: 100%;
   margin-top: 6px;

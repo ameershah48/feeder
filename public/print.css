@@ -160,6 +160,18 @@ p { margin: 0; }
 
 .label-kicker { font-size: 1.6mm; font-weight: 400; letter-spacing: 0.06em; }
 
+/* The condition never shrinks; the details beside it are cut short instead. */
+.label-kicker:has(.label-condition:not(:empty)) { display: flex; align-items: center; gap: 0.8mm; }
+.label-condition {
+  flex: none;
+  padding: 0.15mm 0.5mm 0.05mm;
+  border: 0.2mm solid #000;
+  border-radius: 0.4mm;
+  font-weight: 700;
+}
+.label-condition:empty { display: none; }
+.label-details { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
 .label-set {
   margin-bottom: 0.3mm;
   color: #555;

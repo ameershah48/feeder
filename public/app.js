@@ -17,6 +17,9 @@ const PATHS = {
   spinner: '<path d="M21 12a9 9 0 1 1-6.22-8.56"/>',
   panel: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/>',
   zoom: '<circle cx="11" cy="11" r="7"/><path d="m20 20-4-4M11 8v6M8 11h6"/>',
+  table: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M3 15h18M9 10v10"/>',
+  image: '<rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 16-5-5L5 20"/>',
+  printer: '<path d="M7 9V3h10v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M7 14h10v7H7z"/>',
 };
 
 const icon = (name, size = 16, stroke = 2) =>
@@ -49,6 +52,7 @@ const state = {
 const form = $('scanForm');
 const grid = $('grid');
 const viewer = $('viewer');
+const exportDialog = $('exportDialog');
 const cards = new Map(); // page id -> card element
 let pendingCard = null;
 
@@ -259,9 +263,24 @@ function cardNumbers() {
 
 const isBack = (page) => page.side === 'back';
 
+// Front id -> back page, for two-sided cards whose front is still there. A pair shares one tile.
+let pairs = new Map();
+
+function findPairs() {
+  const ids = new Set(state.pages.map((p) => p.id));
+  return new Map(state.pages.filter((p) => isBack(p) && ids.has(p.front)).map((p) => [p.front, p]));
+}
+
+/** `ids` plus the backs of any fronts among them, so a tile's actions cover both sides. */
+const withBacks = (ids) => [...ids, ...ids.map((id) => pairs.get(id)?.id).filter((id) => id && !ids.includes(id))];
+
 function renderPages() {
   const numbers = cardNumbers();
-  const wanted = state.pages.map((page, i) => updateCard(page, i, numbers.get(page.id)));
+  pairs = findPairs();
+  const paired = new Set([...pairs.values()].map((p) => p.id));
+  const wanted = state.pages
+    .map((page, i) => !paired.has(page.id) && updateCard(page, i, numbers.get(page.id), pairs.get(page.id)))
+    .filter(Boolean);
   if (state.job) wanted.push(updatePendingCard());
   // Only move nodes that are out of place, so existing cards don't re-run their entry animation.
   wanted.forEach((el, i) => {
@@ -278,7 +297,7 @@ function renderPages() {
   if (state.viewing) renderViewer();
 }
 
-function updateCard(page, index, number) {
+function updateCard(page, index, number, backPage) {
   let card = cards.get(page.id);
   if (!card) {
     card = document.createElement('figure');
@@ -286,7 +305,7 @@ function updateCard(page, index, number) {
     card.draggable = true;
     card.dataset.id = page.id;
     card.innerHTML = `
-      <button type="button" class="page-thumb"><img alt="" draggable="false"></button>
+      <div class="page-sides"><button type="button" class="page-thumb"><img alt="" draggable="false"></button></div>
       <label class="page-check"><input type="checkbox">${icon('check', 14, 3)}</label>
       <div class="page-tools">
         <button type="button" data-act="rotl" title="Rotate left" aria-label="Rotate left">${icon('rotateLeft')}</button>
@@ -300,15 +319,34 @@ function updateCard(page, index, number) {
       .append(...Object.entries(CONDITIONS).map(([value, name]) => new Option(name, value)));
     cards.set(page.id, card);
   }
-  const img = card.querySelector('img');
+  const img = card.querySelector('.page-thumb img');
   const src = thumbUrl(page);
   if (img.getAttribute('src') !== src) img.src = src;
+
+  // A two-sided card shows its back beside the front, on the same tile.
+  let backThumb = card.querySelector('.back-thumb');
+  if (backPage && !backThumb) {
+    backThumb = document.createElement('button');
+    backThumb.type = 'button';
+    backThumb.className = 'page-thumb back-thumb';
+    backThumb.innerHTML = '<img alt="" draggable="false">';
+    card.querySelector('.page-sides').append(backThumb);
+  } else if (!backPage && backThumb) {
+    backThumb.remove();
+  }
+  if (backPage) {
+    backThumb.dataset.page = backPage.id;
+    backThumb.setAttribute('aria-label', `Open the back of card ${number}`);
+    const backImg = backThumb.querySelector('img');
+    if (backImg.getAttribute('src') !== thumbUrl(backPage)) backImg.src = thumbUrl(backPage);
+  }
+  card.classList.toggle('pair', Boolean(backPage));
 
   const selected = state.selected.has(page.id);
   const check = card.querySelector('input');
   check.checked = selected;
-  check.setAttribute('aria-label', `Select page ${index + 1}`);
-  card.querySelector('.page-thumb').setAttribute('aria-label', `Open page ${index + 1}`);
+  check.setAttribute('aria-label', `Select card ${number}`);
+  card.querySelector('.page-thumb').setAttribute('aria-label', backPage ? `Open the front of card ${number}` : `Open page ${index + 1}`);
   const back = isBack(page);
   card.classList.toggle('back', back);
   card.querySelector('figcaption').textContent = back ? `${number} · back` : number;
@@ -366,7 +404,7 @@ function renderToolbar() {
   const count = state.selected.size;
   $('pageCount').textContent = total ? plural(total, 'page') : 'No pages';
   $('selectionInfo').textContent = count ? `· ${count} selected` : '';
-  $('selectAllBtn').textContent = count && count === total ? 'Select none' : 'Select all';
+  $('selectAllBtn').textContent = count && count === total - pairs.size ? 'Select none' : 'Select all';
   $('selectAllBtn').disabled = !total;
   for (const id of ['rotateLeftBtn', 'rotateRightBtn', 'deleteBtn']) $(id).disabled = !count;
   grid.classList.toggle('selecting', count > 0);
@@ -386,26 +424,38 @@ function renderToolbar() {
   $('identifyStopBtn').disabled = Boolean(run?.stopping);
   $('identifyStatus').hidden = !run;
   $('identifyStatus').textContent = run?.status ?? '';
+  $('identifyStatus').title = run?.status ?? ''; // the toolbar may cut it short
   $('game').disabled = Boolean(run);
 
   // Export follows the same rule: the selection, or every page when nothing is selected.
   const toExport = (count ? state.pages.filter((p) => state.selected.has(p.id)) : state.pages)
     .filter((p) => p.match?.status === 'candidates').length;
+  // Images cover every scan, identified or not; a selected two-sided card brings its back.
+  const images = count ? withBacks(selectedIds()).length : total;
   $('exportBtn').disabled = !toExport;
-  $('exportBtn').title = toExport
-    ? `Download the top match of ${plural(toExport, 'card')} as a spreadsheet`
+  $('exportCsvDetail').textContent = toExport
+    ? `CSV of ${plural(toExport, 'identified card')}: match, set, condition and price`
     : 'Identify cards to export them';
+  $('imagesBtn').disabled = !images;
+  $('imagesBtn').title = '';
+  $('exportImagesDetail').textContent = images
+    ? `ZIP of ${plural(images, 'scan')}, named after their cards`
+    : 'Scan cards to export their images';
   $('labelsBtn').disabled = !toExport;
-  $('labelsBtn').title = toExport
-    ? `Print a 50 × 30 mm label for ${plural(toExport, 'card')}`
+  $('exportLabelsDetail').textContent = toExport
+    ? `A 50 × 30 mm label for ${plural(toExport, 'identified card')}`
     : 'Identify cards to print their labels';
+  const cardsShown = total - pairs.size;
+  $('exportScope').textContent = count ? `The ${plural(count, 'selected card')}` : `All ${plural(cardsShown, 'card')}`;
+  $('exportOpenBtn').disabled = !images;
+  if (!images && exportDialog.open) exportDialog.close();
 }
 
 function toggleSelection(id, range) {
   const order = state.pages.map((p) => p.id);
   if (range && state.anchor && order.includes(state.anchor)) {
     const [from, to] = [order.indexOf(state.anchor), order.indexOf(id)].sort((a, b) => a - b);
-    for (const pick of order.slice(from, to + 1)) state.selected.add(pick);
+    for (const pick of order.slice(from, to + 1)) if (!pairedBack(pick)) state.selected.add(pick);
   } else if (state.selected.has(id)) {
     state.selected.delete(id);
   } else {
@@ -417,18 +467,25 @@ function toggleSelection(id, range) {
 
 const selectedIds = () => state.pages.filter((p) => state.selected.has(p.id)).map((p) => p.id);
 
+/** Whether `id` is a back shown on its front's tile; such pages are selected through the front. */
+const pairedBack = (id) => [...pairs.values()].some((p) => p.id === id);
+
+/** Every tile in the grid, by the id of the page it is for. */
+const tileIds = () => state.pages.map((p) => p.id).filter((id) => !pairedBack(id));
+
 grid.addEventListener('click', (e) => {
   const card = e.target.closest('.page:not(.pending)');
   if (!card || e.target.closest('.page-check')) return;
   const { id } = card.dataset;
   const action = e.target.closest('[data-act]')?.dataset.act;
-  if (action === 'rotl') rotate([id], -90);
-  else if (action === 'rotr') rotate([id], 90);
-  else if (action === 'delete') removePages([id]);
+  // A two-sided card's tile turns and deletes both sides.
+  if (action === 'rotl') rotate(withBacks([id]), -90);
+  else if (action === 'rotr') rotate(withBacks([id]), 90);
+  else if (action === 'delete') removePages(withBacks([id]), 1);
   else if (e.target.closest('.page-thumb')) {
     // Once something is selected, clicks keep selecting instead of opening the viewer.
     if (state.selected.size || e.shiftKey || e.metaKey || e.ctrlKey) toggleSelection(id, e.shiftKey);
-    else openViewer(id);
+    else openViewer(e.target.closest('.back-thumb')?.dataset.page ?? id);
   }
 });
 
@@ -443,16 +500,30 @@ grid.addEventListener('change', (e) => {
 });
 
 $('selectAllBtn').addEventListener('click', () => {
-  const all = state.selected.size === state.pages.length;
-  state.selected = new Set(all ? [] : state.pages.map((p) => p.id));
+  const tiles = tileIds();
+  const all = state.selected.size === tiles.length;
+  state.selected = new Set(all ? [] : tiles);
   renderPages();
 });
-$('rotateLeftBtn').addEventListener('click', () => rotate(selectedIds(), -90));
-$('rotateRightBtn').addEventListener('click', () => rotate(selectedIds(), 90));
-$('deleteBtn').addEventListener('click', () => removePages(selectedIds()));
+$('rotateLeftBtn').addEventListener('click', () => rotate(withBacks(selectedIds()), -90));
+$('rotateRightBtn').addEventListener('click', () => rotate(withBacks(selectedIds()), 90));
+$('deleteBtn').addEventListener('click', () => removePages(withBacks(selectedIds()), selectedIds().length));
 $('identifyBtn').addEventListener('click', identify);
 $('exportBtn').addEventListener('click', exportCsv);
+$('imagesBtn').addEventListener('click', exportImages);
 $('labelsBtn').addEventListener('click', printLabels);
+
+// The export choices share one dialog, so the toolbar stays short.
+$('exportOpenBtn').addEventListener('click', () => {
+  renderToolbar();
+  exportDialog.showModal();
+});
+$('exportClose').addEventListener('click', () => exportDialog.close());
+exportDialog.addEventListener('click', (e) => {
+  if (e.target === exportDialog || e.target.closest('.export-option:not(:disabled)')) exportDialog.close(); // backdrop, or a choice
+});
+// Keep Escape from also clearing the selection behind the dialog.
+exportDialog.addEventListener('keydown', (e) => { if (e.key === 'Escape') e.stopPropagation(); });
 $('identifyStopBtn').addEventListener('click', () => {
   api('POST', '/api/identify/cancel', {}).catch((err) => toast('error', err.message));
 });
@@ -481,9 +552,11 @@ async function rotate(ids, degrees) {
   }
 }
 
-async function removePages(ids) {
+/** Deletes `ids`, asking first when that is more than one tile (a two-sided card is one tile, two pages). */
+async function removePages(ids, tiles = ids.length) {
   if (!ids.length) return;
-  if (ids.length > 1 && !confirm(`Delete ${plural(ids.length, 'page')}? This can't be undone.`)) return;
+  const what = ids.length > tiles ? 'card' : 'page';
+  if (tiles > 1 && !confirm(`Delete ${plural(tiles, what)}? This can't be undone.`)) return;
   try {
     await api('POST', '/api/pages/delete', { ids });
   } catch (err) {
@@ -512,17 +585,37 @@ async function identify() {
   }
 }
 
+function download(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = name;
+  link.click();
+  setTimeout(() => URL.revokeObjectURL(url), 40000); // Safari may still be reading it
+}
+
 async function exportCsv() {
   try {
     const res = await api('POST', '/api/export', { ids: selectedIds() });
-    const url = URL.createObjectURL(await res.blob());
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `feeder-cards-${new Date().toISOString().slice(0, 10)}.csv`;
-    link.click();
-    setTimeout(() => URL.revokeObjectURL(url), 40000); // Safari may still be reading it
+    download(await res.blob(), `feeder-cards-${new Date().toISOString().slice(0, 10)}.csv`);
   } catch (err) {
     toast('error', err.message);
+  }
+}
+
+async function exportImages() {
+  // A big ZIP takes a moment; the dialog is closed by then, so the toolbar button shows the wait.
+  const button = $('exportOpenBtn');
+  button.classList.add('busy');
+  button.textContent = 'Exporting…';
+  try {
+    const res = await api('POST', '/api/export/images', { ids: withBacks(selectedIds()) });
+    download(await res.blob(), `feeder-scans-${new Date().toISOString().slice(0, 10)}.zip`);
+  } catch (err) {
+    toast('error', err.message);
+  } finally {
+    button.textContent = 'Export';
+    button.classList.remove('busy');
   }
 }
 
@@ -567,8 +660,11 @@ grid.addEventListener('dragover', (e) => {
 grid.addEventListener('drop', (e) => {
   e.preventDefault();
   if (!dragId || !dropTarget) return;
-  const order = state.pages.map((p) => p.id).filter((id) => id !== dragId);
-  order.splice(order.indexOf(dropTarget.id) + (dropTarget.after ? 1 : 0), 0, dragId);
+  // A two-sided card moves as one: its back stays right after its front.
+  const moving = withBacks([dragId]);
+  const order = state.pages.map((p) => p.id).filter((id) => !moving.includes(id));
+  const target = withBacks([dropTarget.id]);
+  order.splice(order.indexOf(dropTarget.id) + (dropTarget.after ? target.length : 0), 0, ...moving);
   const byId = new Map(state.pages.map((p) => [p.id, p]));
   state.pages = order.map((id) => byId.get(id));
   renderPages();
@@ -1040,6 +1136,8 @@ $('rotateLeftBtn').innerHTML = icon('rotateLeft');
 $('rotateRightBtn').innerHTML = icon('rotateRight');
 $('deleteBtn').innerHTML = icon('trash');
 $('viewerDownload').innerHTML = icon('download');
+$('exportClose').innerHTML = icon('close');
+for (const el of exportDialog.querySelectorAll('[data-icon]')) el.innerHTML = icon(el.dataset.icon, 20);
 const viewerIcons = { rotl: 'rotateLeft', rotr: 'rotateRight', delete: 'trash', close: 'close', prev: 'prev', next: 'next' };
 for (const el of viewer.querySelectorAll('[data-viewer]')) el.innerHTML = icon(viewerIcons[el.dataset.viewer], el.classList.contains('nav') ? 20 : 16);
 

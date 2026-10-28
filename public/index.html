@@ -97,12 +97,14 @@
           <span id="selectionInfo"></span>
         </div>
         <div class="toolbar-actions">
+          <div class="toolbar-group">
           <button type="button" class="btn" id="selectAllBtn">Select all</button>
           <span class="divider"></span>
           <button type="button" class="icon-btn" id="rotateLeftBtn" title="Rotate selected left" aria-label="Rotate selected left" disabled></button>
           <button type="button" class="icon-btn" id="rotateRightBtn" title="Rotate selected right" aria-label="Rotate selected right" disabled></button>
           <button type="button" class="icon-btn danger" id="deleteBtn" title="Delete selected" aria-label="Delete selected" disabled></button>
-          <span class="divider"></span>
+          </div>
+          <div class="toolbar-group">
           <select id="game" class="compact" aria-label="Card game" title="Card game">
             <option value="">Any game</option>
             <option value="pokemon">Pokémon</option>
@@ -122,8 +124,8 @@
           <span class="identify-status" id="identifyStatus" hidden></span>
           <button type="button" class="btn" id="identifyStopBtn" hidden>Stop</button>
           <button type="button" class="btn primary" id="identifyBtn" disabled>Identify cards</button>
-          <button type="button" class="btn" id="exportBtn" disabled>Export CSV</button>
-          <button type="button" class="btn" id="labelsBtn" disabled>Print labels</button>
+          <button type="button" class="btn" id="exportOpenBtn" aria-haspopup="dialog">Export</button>
+          </div>
         </div>
       </div>
 
@@ -221,6 +223,30 @@
         </form>
         <p class="match-note">Suggestions from the TCGSDK scanner beta. Check them before relying on them.</p>
       </aside>
+    </div>
+  </dialog>
+
+  <dialog class="export-dialog" id="exportDialog" aria-labelledby="exportTitle">
+    <div class="export-head">
+      <div>
+        <h2 id="exportTitle">Export</h2>
+        <p class="export-scope" id="exportScope"></p>
+      </div>
+      <button type="button" class="icon-btn" id="exportClose" title="Close (Esc)" aria-label="Close"></button>
+    </div>
+    <div class="export-options">
+      <button type="button" class="export-option" id="exportBtn" disabled>
+        <span class="export-icon" data-icon="table"></span>
+        <span><strong>Spreadsheet</strong><span class="export-detail" id="exportCsvDetail"></span></span>
+      </button>
+      <button type="button" class="export-option" id="imagesBtn" disabled>
+        <span class="export-icon" data-icon="image"></span>
+        <span><strong>Images</strong><span class="export-detail" id="exportImagesDetail"></span></span>
+      </button>
+      <button type="button" class="export-option" id="labelsBtn" disabled>
+        <span class="export-icon" data-icon="printer"></span>
+        <span><strong>Print labels</strong><span class="export-detail" id="exportLabelsDetail"></span></span>
+      </button>
     </div>
   </dialog>
 

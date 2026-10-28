@@ -710,6 +710,108 @@ function sendCsv(res, csv) {
 }
 
 // ---------------------------------------------------------------------------
+// Image export: the scans as a ZIP, named after their cards
+
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+
+function crc32(buffer) {
+  let crc = 0xffffffff;
+  for (const byte of buffer) crc = CRC_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+/** Card numbers as the grid shows them: a two-sided back shares its front's number. */
+function cardNumbers() {
+  const numbers = new Map();
+  let n = 0;
+  for (const page of pages) numbers.set(page.id, page.side === 'back' ? numbers.get(page.front) ?? n : ++n);
+  return numbers;
+}
+
+/** "003 Ferrothorn (199-165) front.jpg": the card number, its match when it has one, and the side. */
+function imageName(page, number, digits) {
+  const front = page.side === 'back' ? pages.find((p) => p.id === page.front) : page;
+  const top = front?.match?.status === 'candidates' ? chosenCandidate(front.match) : null;
+  const card = top ? [top.name, top.number && `(${top.number})`].filter(Boolean).join(' ') : '';
+  const name = [String(number).padStart(digits, '0'), card, page.side].filter(Boolean).join(' ')
+    .replace(/[\\/:*?"<>|\x00-\x1f]+/g, '-') // characters Windows and macOS don't allow in file names
+    .replace(/\s+/g, ' ').trim();
+  return name + path.extname(page.file);
+}
+
+/**
+ * Streams the page images as a ZIP. The scans are already JPEG or PNG, so they're stored rather than
+ * compressed, one file in memory at a time.
+ */
+async function sendImagesZip(res, wanted) {
+  const chosen = pages.filter((p) => !wanted.length || wanted.includes(p.id));
+  if (!chosen.length) throw httpError(400, 'There are no scans to export.');
+  const numbers = cardNumbers();
+  const digits = Math.max(3, String(Math.max(...numbers.values())).length);
+
+  const now = new Date();
+  const time = (now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1);
+  const date = ((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate();
+
+  res.writeHead(200, { 'Content-Type': 'application/zip', 'Cache-Control': 'no-store' });
+  const write = (buffer) => new Promise((resolve, reject) => res.write(buffer, (err) => (err ? reject(err) : resolve())));
+  const central = [];
+  const used = new Set();
+  let offset = 0;
+
+  for (const page of chosen) {
+    let data;
+    try {
+      data = await fs.readFile(path.join(PAGES_DIR, page.file));
+    } catch {
+      continue; // deleted meanwhile
+    }
+    let fileName = imageName(page, numbers.get(page.id), digits);
+    for (let i = 2; used.has(fileName.toLowerCase()); i++) fileName = fileName.replace(/( \(\d+\))?(\.\w+)$/, ` (${i})$2`);
+    used.add(fileName.toLowerCase());
+    const name = Buffer.from(fileName, 'utf8');
+    const crc = crc32(data);
+
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4); // version needed
+    local.writeUInt16LE(0x0800, 6); // names are UTF-8
+    local.writeUInt16LE(0, 8); // stored
+    local.writeUInt16LE(time, 10);
+    local.writeUInt16LE(date, 12);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(name.length, 26);
+    local.writeUInt16LE(0, 28);
+
+    const entry = Buffer.alloc(46);
+    entry.writeUInt32LE(0x02014b50, 0);
+    entry.writeUInt16LE(20, 4); // version made by
+    local.copy(entry, 6, 4, 30); // version needed \u2026 name length are the same as the local header
+    entry.writeUInt32LE(offset, 42);
+    central.push(entry, name);
+
+    await write(Buffer.concat([local, name]));
+    await write(data);
+    offset += local.length + name.length + data.length;
+  }
+
+  const directory = Buffer.concat(central);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(central.length / 2, 8);
+  end.writeUInt16LE(central.length / 2, 10);
+  end.writeUInt32LE(directory.length, 12);
+  end.writeUInt32LE(offset, 16);
+  res.end(Buffer.concat([directory, end]));
+}
+
+// ---------------------------------------------------------------------------
 // Labels of identified cards, for public/print.html
 
 /** One label per identified page, priced in `currency` when there's a rate for it and in TCGSDK's currency otherwise. */
@@ -863,6 +965,7 @@ async function handle(req, res) {
     case 'POST /api/identify/cancel': cancelIdentify(); return sendJson(res, 200, {});
     case 'GET /api/rates': return sendJson(res, 200, await getRates());
     case 'POST /api/export': return sendCsv(res, await exportCsv(ids(await readJson(req))));
+    case 'POST /api/export/images': return sendImagesZip(res, ids(await readJson(req)));
     case 'GET /api/labels': {
       const wanted = searchParams.get('ids')?.split(',').filter(Boolean) ?? [];
       const currency = searchParams.get('currency');
